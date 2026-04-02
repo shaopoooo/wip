@@ -1,0 +1,26 @@
+# 正式環境專用
+# 啟動：docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# ENV_FILE 未設定時預設 .env，可覆寫：ENV_FILE=.env.staging docker compose -f ... up -d
+
+services:
+  db:
+    env_file: ${ENV_FILE:-.env}
+    restart: unless-stopped
+
+  app:
+    env_file: ${ENV_FILE:-.env}
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./front/dist:/usr/share/nginx/html:ro
+    depends_on:
+      app:
+        condition: service_healthy

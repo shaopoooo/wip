@@ -1,0 +1,30 @@
+# Environment — 真實設定檔不可 commit
+.env
+.env.dev
+# 範本檔可以 commit（*.example）
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Build output
+backend/dist/
+front/dist/
+
+# TypeScript
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Docker volumes (local dev)
+.postgres-data/
+
+# Logs
+logs/
+*.log

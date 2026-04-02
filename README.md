@@ -100,12 +100,13 @@ GKE Autopilot + Cloud SQL HA + Memorystore Standard + Cloud Pub/Sub（IoT）+ Bi
 ### Phase 1 — WIP 核心（4~6 週, 1~2 人）
 > 讓每張工單在每一站留下數位足跡
 
-詳見 `TODO.md`
+詳見 `.claude/tasks.md`
 
 ### Phase 2 — WIP 進階 + 庫存基礎（6~8 週, 2~3 人）
 > 串起 BOM 與庫存，形成進銷存的「存」
 
-- 操作員登入（工號 + 密碼 或 員工證 QR Code）
+- **統一身份認證（Authentik + Google SSO）**：部署自建 IdP，員工用 Google 帳號登入所有內部服務（WIP、Email、共享硬碟），WIP /admin 從 Phase 1 的本地 JWT 遷移至 OIDC
+- 操作員登入（掃描側啟用，工號綁定 Google 帳號）
 - BOM 管理（多階 BOM、替代料、版本控管）
 - 倉庫 / 庫存管理（三倉、儲位、安全庫存）
 - 自動扣料 / 入庫
