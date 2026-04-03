@@ -10,13 +10,13 @@ services:
     # 不在 base 使用 ${VAR} 插值讀取 credentials
     # credentials 由各環境的 env_file 注入（override.yml / prod.yml）
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready"]   # 不依賴 ${VAR}，直接檢查本地 postgres
+      test: [ "CMD-SHELL", "pg_isready" ] # 不依賴 ${VAR}，直接檢查本地 postgres
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
 
-  app:
+  backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -24,7 +24,7 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1" ]
       interval: 15s
       timeout: 5s
       retries: 3

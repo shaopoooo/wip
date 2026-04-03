@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: -apple-system, 'PingFang TC', 'Noto Sans TC', sans-serif;
+  --color-primary: #1a73e8;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  touch-action: manipulation;
+  -webkit-font-smoothing: antialiased;
+}
+
+input, textarea {
+  user-select: text;
+}

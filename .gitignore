@@ -9,7 +9,7 @@ npm-debug.log*
 
 # Build output
 backend/dist/
-front/dist/
+frontend/dist/
 
 # TypeScript
 *.tsbuildinfo

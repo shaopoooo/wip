@@ -162,9 +162,10 @@ export const devices = pgTable(
   'devices',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    stationId: uuid('station_id')
+    departmentId: uuid('department_id')
       .notNull()
-      .references(() => stations.id),
+      .references(() => departments.id),
+    stationId: uuid('station_id').references(() => stations.id), // optional default station
     name: varchar('name', { length: 100 }),       // optional nickname
     deviceType: varchar('device_type', { length: 20 }).notNull(), // tablet | phone | scanner
     userAgent: text('user_agent'),

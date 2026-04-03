@@ -1,13 +1,13 @@
-# Generate commit message
+# 產生 Commit 訊息
 
 !git diff --cached
 
-Follow our conventional commit rules:
-- Use type: feat, fix, refactor, chore, docs, style, test, perf
-- Keep subject line under 50 characters
-- Add body with details if needed
+依照以下規則產生 commit 訊息：
+- type 使用：feat、fix、refactor、chore、docs、style、test、perf
+- Subject line 保持在 50 字元以內（中文）
+- Body 使用**繁體中文**條列說明變更內容
 
-Generate the final commit message in this format:
+輸出格式：
 <type>(<scope>): <subject>
 
 <body>

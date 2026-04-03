@@ -21,7 +21,7 @@ npm run migrate      # 執行 Drizzle 遷移
 npm run migrate:gen  # 產生新遷移檔
 
 # 前端
-cd front
+cd frontend
 npm run dev          # Vite dev server
 npm run build        # 生產打包
 npm run preview      # 預覽打包結果
@@ -44,6 +44,37 @@ docker compose logs -f app                                                      
 >
 > - `NODE_ENV` 由 npm script / Docker 負責設定，`loadEnv.ts` 依此決定讀哪個檔案
 > - compose 的 `env_file` 透過 shell 變數 `ENV_FILE` 控制，預設值各自回落（`docker-compose.yml` → `.env`；`docker-compose.dev.yml` → `.env.dev`），不寫死檔名
+
+> **重啟與資料重置流程**
+>
+> | 情境 | 指令 |
+> |------|------|
+> | 程式碼異動（一般重啟）| `docker compose up -d --build` |
+> | 環境變數異動 | `docker compose up -d --build` |
+> | Schema 異動（新遷移檔）| `docker compose up -d --build`（entrypoint 自動執行 migrate）|
+> | **完整清除重來**（含資料）| 見下方流程 |
+>
+> **完整清除重來（`docker compose down -v` 之後）：**
+> ```bash
+> # 1. 重新啟動所有服務（entrypoint 自動執行 migration）
+> docker compose up -d --build
+>
+> # 2. 確認後端完全啟動（看到 "listening on port 3000" 後 Ctrl+C）
+> docker compose logs -f backend
+>
+> # 3. 執行 seed（補建初始資料）
+> docker compose exec backend npm run seed
+> ```
+>
+> **需要 `docker compose down -v`（完整清除）的情況：**
+> - DB Schema 有 breaking change（欄位刪除、型別變更、constraint 衝突）
+> - Migration 執行失敗且無法 rollback
+> - 要從乾淨狀態重新測試 seed / migration
+>
+> **不需要 `docker compose down -v` 的情況（用 `docker compose up -d --build` 即可）：**
+> - 新增欄位（backward-compatible migration）
+> - 後端 / 前端程式碼異動
+> - 環境變數修改
 
 > **套件安裝規範**
 > - 開發時：`npm install`（本地新增套件後須確認版本年齡 ≥ 7 天、`package.json` 改為精確版本號）
@@ -117,7 +148,7 @@ docker compose logs -f app                                                      
     /utils        — 純函式工具（camelCase，如 qrCode.ts、timeUtil.ts）
     /jobs         — 背景排程（node-cron）
   /tests
-/front
+/frontend
   /src
     /pages        — 頁面元件（PascalCase）
     /components   — 共用元件（掃描器、看板卡片）

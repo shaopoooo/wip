@@ -2,13 +2,13 @@ import { Router } from 'express'
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../models/db'
-import { devices, stations, groups, departments } from '../models/schema'
+import { devices, stations, departments } from '../models/schema'
 import { sendSuccess } from '../utils/response'
 import { AppError, ErrorCode } from '../utils/errors'
 
 const router = Router()
 
-// GET /api/devices/:id  — returns device + station + department
+// GET /api/devices/:id  — returns device + optional station + department
 router.get('/:id', async (req, res, next) => {
   try {
     const { id } = req.params
@@ -20,8 +20,8 @@ router.get('/:id', async (req, res, next) => {
         department: departments,
       })
       .from(devices)
-      .innerJoin(stations, eq(devices.stationId, stations.id))
-      .innerJoin(departments, eq(stations.departmentId, departments.id))
+      .innerJoin(departments, eq(devices.departmentId, departments.id))
+      .leftJoin(stations, eq(devices.stationId, stations.id))
       .where(eq(devices.id, id))
       .limit(1)
 
@@ -37,7 +37,8 @@ router.get('/:id', async (req, res, next) => {
 
 // POST /api/devices/register  — BYOD first-time registration
 const RegisterSchema = z.object({
-  stationId: z.string().uuid(),
+  departmentId: z.string().uuid(),
+  stationId: z.string().uuid().optional(),
   deviceType: z.enum(['tablet', 'phone', 'scanner']),
   name: z.string().max(100).optional(),
   userAgent: z.string().optional(),
@@ -56,18 +57,30 @@ router.post('/register', async (req, res, next) => {
       )
     }
 
-    const { stationId, deviceType, name, userAgent, screenInfo, timezone, webglRenderer, employeeId } =
+    const { departmentId, stationId, deviceType, name, userAgent, screenInfo, timezone, webglRenderer, employeeId } =
       parsed.data
 
-    // Verify station exists
-    const [station] = await db
-      .select({ id: stations.id })
-      .from(stations)
-      .where(eq(stations.id, stationId))
+    // Verify department exists
+    const [department] = await db
+      .select({ id: departments.id })
+      .from(departments)
+      .where(eq(departments.id, departmentId))
       .limit(1)
 
-    if (!station) {
-      return next(new AppError(ErrorCode.NOT_FOUND, 'Station not found', 404))
+    if (!department) {
+      return next(new AppError(ErrorCode.NOT_FOUND, 'Department not found', 404))
+    }
+
+    if (stationId) {
+      const [station] = await db
+        .select({ id: stations.id, departmentId: stations.departmentId })
+        .from(stations)
+        .where(eq(stations.id, stationId))
+        .limit(1)
+      if (!station) return next(new AppError(ErrorCode.NOT_FOUND, 'Station not found', 404))
+      if (station.departmentId !== departmentId) {
+        return next(new AppError(ErrorCode.WRONG_DEPARTMENT, '站點不屬於指定部門', 400))
+      }
     }
 
     const ipAddress = (req.headers['x-forwarded-for'] as string | undefined)
@@ -77,7 +90,8 @@ router.post('/register', async (req, res, next) => {
     const [device] = await db
       .insert(devices)
       .values({
-        stationId,
+        departmentId,
+        stationId: stationId ?? null,
         deviceType,
         name: name ?? null,
         userAgent: userAgent ?? null,
@@ -85,7 +99,7 @@ router.post('/register', async (req, res, next) => {
         timezone: timezone ?? null,
         webglRenderer: webglRenderer ?? null,
         employeeId: employeeId ?? null,
-        ipAddress: ipAddress as unknown as string, // inet column accepts string
+        ipAddress: ipAddress as unknown as string,
         lastSeenAt: new Date(),
       })
       .returning()

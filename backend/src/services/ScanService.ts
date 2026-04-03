@@ -16,12 +16,14 @@ type WorkOrder = typeof workOrders.$inferSelect
 type ProcessStep = typeof processSteps.$inferSelect
 type StationLog = typeof stationLogs.$inferSelect
 type Device = typeof devices.$inferSelect
+type Station = typeof stations.$inferSelect
 
 // ── Public interface ───────────────────────────────────────────────────────────
 
 export interface ScanInput {
   workOrderId: string
   device: Device
+  stationId?: string // Optional override from UI
   /** Check-out only. Defaults to actualQtyIn - defectQty. */
   actualQtyOut?: number
   /** Check-out only. Defaults to 0. */
@@ -45,8 +47,6 @@ export interface CorrectionInput {
 
 const DEDUP_SECONDS = 30
 
-// ── ScanService ────────────────────────────────────────────────────────────────
-
 export class ScanService {
   // ── Main entry point ─────────────────────────────────────────────────────────
 
@@ -69,21 +69,7 @@ export class ScanService {
       throw new AppError(ErrorCode.ORDER_ALREADY_SPLIT, '此工單已拆分，請掃描子單')
     }
 
-    // 2. Fetch device station → department
-    const [station] = await db
-      .select()
-      .from(stations)
-      .where(eq(stations.id, device.stationId))
-      .limit(1)
-
-    if (!station) throw new AppError(ErrorCode.NOT_FOUND, '設備站點不存在', 500)
-
-    // 3. Department isolation check
-    if (station.departmentId !== wo.departmentId) {
-      throw new AppError(ErrorCode.WRONG_DEPARTMENT, '此工單不屬於本產線')
-    }
-
-    // 4. Fetch route steps ordered by step_order
+    // 2. Fetch route steps ordered by step_order
     const steps = await db
       .select()
       .from(processSteps)
@@ -94,24 +80,75 @@ export class ScanService {
       throw new AppError(ErrorCode.NOT_FOUND, '工序路由無步驟', 500)
     }
 
-    // 5. Is there an open (in-progress) log for this WO at this station?
+    // 3. Determine the target station
+    const targetStationId = await this.determineTargetStationId(wo.id, steps, input.stationId)
+
+    const [station] = await db
+      .select()
+      .from(stations)
+      .where(eq(stations.id, targetStationId))
+      .limit(1)
+
+    if (!station) throw new AppError(ErrorCode.NOT_FOUND, '目標設備站點不存在', 500)
+
+    // Department isolation check (Device's department vs Station's department)
+    // Actually, Device department should match WO's department.
+    if (device.departmentId !== wo.departmentId) {
+      throw new AppError(ErrorCode.WRONG_DEPARTMENT, '此裝置不屬於本產線，無法報工此工單')
+    }
+
+    // 4. Is there an open (in-progress) log for this WO at this station?
     const [openLog] = await db
       .select()
       .from(stationLogs)
       .where(
         and(
           eq(stationLogs.workOrderId, workOrderId),
-          eq(stationLogs.stationId, device.stationId),
+          eq(stationLogs.stationId, targetStationId),
           isNull(stationLogs.checkOutTime),
         ),
       )
       .limit(1)
 
     if (openLog) {
-      return this.doCheckOut({ wo, device, steps, openLog, input })
+      return this.doCheckOut({ wo, device, station, steps, openLog, input })
     }
 
-    return this.doCheckIn({ wo, device, steps, input })
+    return this.doCheckIn({ wo, device, station, steps, input })
+  }
+
+  // ── Infer Target Station ──────────────────────────────────────────────────────
+
+  static async determineTargetStationId(workOrderId: string, steps: ProcessStep[], overrideStationId?: string): Promise<string> {
+    if (overrideStationId) return overrideStationId
+
+    // Auto-infer based on progress
+    const completedLogs = await db
+      .select()
+      .from(stationLogs)
+      .where(and(eq(stationLogs.workOrderId, workOrderId), isNotNull(stationLogs.checkOutTime)))
+      .orderBy(desc(stationLogs.checkInTime))
+
+    const activeLog = await db
+      .select()
+      .from(stationLogs)
+      .where(and(eq(stationLogs.workOrderId, workOrderId), isNull(stationLogs.checkOutTime)))
+      .limit(1)
+
+    // If there's an open log, that is the current station
+    if (activeLog && activeLog.length > 0) {
+      return activeLog[0]!.stationId
+    }
+
+    // Otherwise, find the next uncompleted step
+    const completedStepIds = new Set(completedLogs.map((l) => l.stepId))
+    const nextStep = steps.find(s => !completedStepIds.has(s.id))
+    if (nextStep) {
+      return nextStep.stationId
+    }
+
+    // If all steps completed, but work order somehow not marked completed, guess last station
+    return steps[steps.length - 1]!.stationId
   }
 
   // ── Check-out ─────────────────────────────────────────────────────────────────
@@ -119,12 +156,14 @@ export class ScanService {
   private static async doCheckOut({
     wo,
     device,
+    station,
     steps,
     openLog,
     input,
   }: {
     wo: WorkOrder
     device: Device
+    station: Station
     steps: ProcessStep[]
     openLog: StationLog
     input: ScanInput
@@ -135,7 +174,7 @@ export class ScanService {
     const actualQtyOut = input.actualQtyOut ?? actualQtyIn - defectQty
 
     const lastStep = steps[steps.length - 1]
-    const isLastStep = lastStep?.stationId === device.stationId
+    const isLastStep = lastStep?.id === openLog.stepId
 
     const updatedLog = await db.transaction(async (tx) => {
       const [log] = await tx
@@ -175,18 +214,20 @@ export class ScanService {
   private static async doCheckIn({
     wo,
     device,
+    station,
     steps,
     input,
   }: {
     wo: WorkOrder
     device: Device
+    station: Station
     steps: ProcessStep[]
     input: ScanInput
   }): Promise<ScanResult> {
     const now = new Date()
 
     // Confirm current station is in this route
-    const currentStep = steps.find((s) => s.stationId === device.stationId)
+    const currentStep = steps.find((s) => s.stationId === station.id)
     if (!currentStep) {
       throw new AppError(ErrorCode.SKIP_STATION, '此站點不在工單的工序路由中')
     }
@@ -199,7 +240,7 @@ export class ScanService {
       .where(
         and(
           eq(stationLogs.workOrderId, wo.id),
-          eq(stationLogs.stationId, device.stationId),
+          eq(stationLogs.stationId, station.id),
           gt(stationLogs.checkInTime, cutoff),
         ),
       )
@@ -216,21 +257,17 @@ export class ScanService {
       .where(and(eq(stationLogs.workOrderId, wo.id), isNotNull(stationLogs.checkOutTime)))
       .orderBy(desc(stationLogs.checkInTime))
 
-    // Last completed step_order
     const completedStepIds = new Set(completedLogs.map((l) => l.stepId))
     const lastCompletedStepOrder = steps
       .filter((s) => completedStepIds.has(s.id))
       .reduce((max, s) => Math.max(max, s.stepOrder), 0)
 
-    // Steps that need auto-fill (gap between last completed and current)
     const gapSteps = steps.filter(
       (s) => s.stepOrder > lastCompletedStepOrder && s.stepOrder < currentStep.stepOrder,
     )
 
-    // Base time for auto-fill: last completed log's check_out, or now
     const lastCompletedLog = completedLogs[0]
-    const autoFillBaseTime =
-      lastCompletedLog?.checkOutTime != null ? lastCompletedLog.checkOutTime : now
+    const autoFillBaseTime = lastCompletedLog?.checkOutTime != null ? lastCompletedLog.checkOutTime : now
 
     const newLog = await db.transaction(async (tx) => {
       // Auto-fill gap stations
@@ -265,7 +302,7 @@ export class ScanService {
         .insert(stationLogs)
         .values({
           workOrderId: wo.id,
-          stationId: device.stationId,
+          stationId: station.id,
           stepId: currentStep.id,
           deviceId: device.id,
           checkInTime: now,
@@ -275,7 +312,6 @@ export class ScanService {
         })
         .returning()
 
-      // Transition work order from pending → in_progress
       if (wo.status === 'pending') {
         await tx
           .update(workOrders)
@@ -287,7 +323,7 @@ export class ScanService {
         entityType: 'station_log',
         entityId: log!.id,
         action: 'check_in',
-        changes: { stationId: device.stationId, checkInTime: now.toISOString() },
+        changes: { stationId: station.id, checkInTime: now.toISOString() },
         deviceId: device.id,
       })
 

@@ -5,28 +5,44 @@ services:
   db:
     env_file: ${ENV_FILE:-.env.dev}
     ports:
-      - "5432:5432"     # 對外開放，方便 TablePlus / psql 直連
+      - "5432:5432" # 對外開放，方便 TablePlus / psql 直連
     volumes:
-      - postgres_data_dev:/var/lib/postgresql/data   # 使用獨立 volume，不污染 prod
+      - postgres_data_dev:/var/lib/postgresql/data # 使用獨立 volume，不污染 prod
     healthcheck:
       interval: 5s
       timeout: 3s
       retries: 5
       start_period: 5s
 
-  app:
+  backend:
     build:
-      target: builder   # builder stage 含 ts-node + nodemon
+      target: builder # builder stage 含 ts-node + nodemon
     env_file: ${ENV_FILE:-.env.dev}
     environment:
       NODE_ENV: development
     ports:
-      - "3000:3000"     # 對外開放，方便 Postman / 瀏覽器直連
+      - "3000:3000" # 對外開放，方便 Postman / 瀏覽器直連
     volumes:
-      - ./backend/src:/app/src:ro                      # hot reload
+      - ./backend/src:/app/src:ro # hot reload
       - ./backend/drizzle.config.ts:/app/drizzle.config.ts:ro
       - ./migrations:/migrations
     command: sh -c "npm run migrate && npm run dev"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    env_file: ${ENV_FILE:-.env.dev}
+    environment:
+      - VITE_API_URL=http://backend:3000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
 
 volumes:
   postgres_data_dev:

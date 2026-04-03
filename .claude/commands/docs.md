@@ -1,6 +1,6 @@
-# Update documentation
+# 更新文件
 
 !git diff --name-only
 
-Find all changed files and update the corresponding README.md or docs in the same folder.
-Use clear, concise language and follow our documentation style.
+找出所有變更的檔案，更新對應資料夾中的 README.md 或文件。
+使用**繁體中文**撰寫，語言簡潔清楚，符合本專案的文件風格。
