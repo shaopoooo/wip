@@ -188,47 +188,50 @@ docker compose exec backend npm run seed
 > 驗收：建產品 → 建路由 → 建工單 → 印 QR Code → 掃描 → 完工，全閉環
 
 #### Backend — 管理後台認證 API
-- [ ] `POST /api/admin/auth/login`（帳密登入，回傳 JWT access token + refresh token）
-- [ ] `POST /api/admin/auth/refresh`（用 refresh token 換新 access token）
-- [ ] `POST /api/admin/auth/logout`（廢棄 refresh token）
-- [ ] `GET /api/admin/auth/me`（取當前登入帳號資訊）
-- [ ] JWT auth middleware（驗 Bearer token，掛在所有 `/api/admin/*` 路由）
-- [ ] `GET /api/admin/roles`（角色列表）
-- [ ] `POST /api/admin/roles`（新增角色）
-- [ ] `DELETE /api/admin/roles/:id`（刪除角色，需確認無人使用中）
-- [ ] `GET /api/admin/users`（管理員帳號列表）
-- [ ] `POST /api/admin/users`（新增管理員帳號，指定角色）
-- [ ] `PATCH /api/admin/users/:id`（修改角色 / 停用帳號）
-- [ ] `DELETE /api/admin/users/:id`
+- [x] `POST /api/admin/auth/login`（帳密登入，回傳 JWT access token + refresh token）
+- [x] `POST /api/admin/auth/refresh`（用 refresh token 換新 access token）
+- [x] `POST /api/admin/auth/logout`（廢棄 refresh token）
+- [x] `GET /api/admin/auth/me`（取當前登入帳號資訊）
+- [x] JWT auth middleware（驗 httpOnly cookie，掛在所有 `/api/admin/*` 路由）
+- [x] `GET /api/admin/roles`（角色列表）
+- [x] `POST /api/admin/roles`（新增角色）
+- [x] `DELETE /api/admin/roles/:id`（刪除角色，需確認無人使用中）
+- [x] `GET /api/admin/users`（管理員帳號列表）
+- [x] `POST /api/admin/users`（新增管理員帳號，指定角色）
+- [x] `PATCH /api/admin/users/:id`（修改角色 / 停用帳號）
+- [x] `DELETE /api/admin/users/:id`
 
 #### Backend — 補充 API（需掛 JWT middleware）
-- [ ] `POST/PATCH/DELETE /api/admin/groups`
-- [ ] `POST/PATCH/DELETE /api/admin/products`
-- [ ] `POST/PATCH/DELETE /api/admin/stations`
-- [ ] `POST/PATCH/DELETE /api/admin/equipment`
-- [ ] `POST/PATCH/DELETE /api/admin/process-routes`
-- [ ] `POST/PATCH/DELETE /api/admin/process-routes/:id/steps`
-- [ ] `POST /api/admin/work-orders`（自動產生 `WO-A-2026-XXX` 編號）
-- [ ] `PATCH /api/admin/work-orders/:id/status`
-- [ ] `GET /api/admin/work-orders/:id/qrcode`（回傳 QR PNG base64）
-- [ ] `GET /api/admin/work-orders/print?ids=...`（批次列印資料）
+- [x] `POST/PATCH/DELETE /api/admin/groups`
+- [x] `POST/PATCH/DELETE /api/admin/products`
+- [x] `POST/PATCH/DELETE /api/admin/stations`
+- [x] `GET/POST/PATCH/DELETE /api/admin/equipment`
+- [x] `POST/PATCH/DELETE /api/admin/process-routes`
+- [x] `GET/POST/PATCH/DELETE /api/admin/process-routes/:id/steps`
+- [x] `POST /api/admin/work-orders`（自動產生 `WO-{DEPT}-{YEAR}-{SEQ}` 編號）
+- [x] `PATCH /api/admin/work-orders/:id/status`
+- [x] `GET /api/admin/work-orders/:id/qrcode`（回傳 QR PNG base64）
+- [x] `GET /api/admin/work-orders/print?ids=...`（批次列印資料）
+- [x] `GET /api/products?department_id=`（公開，供前端下拉選單用）
+- [x] `GET /api/process-routes?department_id=`（公開）
+- [x] `GET /api/process-routes/:id/steps`（公開）
 
 #### Frontend — 管理後台（`/admin`）
-- [ ] 登入頁（`/admin/login`）：帳號 + 密碼表單，JWT 存入 httpOnly cookie（禁止 localStorage）
-- [ ] Auth context / hook（`useAdminAuth`）：管理登入狀態、自動 refresh token
-- [ ] Protected Route wrapper（未登入自動跳 `/admin/login`）
-- [ ] 角色管理頁（`/admin/roles`）：角色列表、新增角色（填名稱/描述）、刪除角色
-- [ ] 管理員帳號頁（`/admin/users`）：帳號列表、新增帳號（填帳號/密碼/角色）、停用/刪除
-- [ ] 組別管理頁（樹狀：部門 → 組 → 站點，CRUD）
-- [ ] 站點管理頁（含組別下拉）
-- [ ] 設備管理頁（含站點綁定）
-- [ ] 產品型號管理頁（CRUD）
-- [ ] 工序路由管理頁（步驟可拖曳排序）
-- [ ] 工單列表頁（部門 + 狀態篩選，分頁）
-- [ ] 建立工單頁（選部門 → 產品 → 路由 → 數量、交期、優先級）
-- [ ] 工單詳情頁（站點歷程進度）
-- [ ] QR Code 預覽 + 單張列印
-- [ ] 批次列印頁（勾選多張工單 → 列印版面）
+- [x] 登入頁（`/admin/login`）：帳號 + 密碼表單，JWT 存入 httpOnly cookie（禁止 localStorage）
+- [x] Auth context / hook（`useAdminAuth`）：管理登入狀態、自動 refresh token
+- [x] Protected Route wrapper（未登入自動跳 `/admin/login`）
+- [x] 角色管理頁（`/admin/roles`）：角色列表、新增角色（填名稱/描述）、刪除角色
+- [x] 管理員帳號頁（`/admin/users`）：帳號列表、新增帳號（填帳號/密碼/角色）、停用/刪除
+- [x] 組別管理頁（CRUD，含部門篩選）
+- [x] 站點管理頁（含組別下拉）
+- [x] 設備管理頁（含站點篩選）
+- [x] 產品型號管理頁（CRUD）
+- [x] 工序路由管理頁（步驟上下移動排序）
+- [x] 工單列表頁（部門 + 狀態篩選）
+- [x] 建立工單頁（Modal：選部門 → 產品 → 路由 → 數量、交期、優先級）
+- [x] 工單詳情頁（站點歷程進度）
+- [x] QR Code 預覽 + 單張列印
+- [x] 批次列印頁（`/admin/print?ids=...`）
 
 ---
 

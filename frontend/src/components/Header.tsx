@@ -31,6 +31,9 @@ export function Header() {
           <button onClick={() => navigate('/setup')} className="text-slate-300 hover:text-white border border-slate-600 hover:border-slate-400 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer">
             裝置重設
           </button>
+          <button onClick={() => navigate('/admin')} className="text-slate-300 hover:text-white border border-slate-600 hover:border-slate-400 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer">
+            管理後台
+          </button>
         </div>
       )}
     </div>

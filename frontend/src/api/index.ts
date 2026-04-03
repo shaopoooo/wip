@@ -54,7 +54,7 @@ export interface RegisterDeviceInput {
   timezone?: string
   userAgent?: string
   screenInfo?: Record<string, unknown>
-  webglRenderer?: string
+  webglRenderer?: string | null
   employeeId?: string
 }
 
