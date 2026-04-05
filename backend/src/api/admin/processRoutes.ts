@@ -129,7 +129,11 @@ router.post('/:id/steps', async (req, res, next) => {
   try {
     const { id } = req.params as { id: string }
 
-    const [route] = await db.select({ id: processRoutes.id }).from(processRoutes).where(eq(processRoutes.id, id)).limit(1)
+    const [route] = await db
+      .select({ id: processRoutes.id, departmentId: processRoutes.departmentId })
+      .from(processRoutes)
+      .where(eq(processRoutes.id, id))
+      .limit(1)
     if (!route) return next(new AppError(ErrorCode.NOT_FOUND, '路由不存在', 404))
 
     const parsed = StepSchema.safeParse(req.body)
@@ -137,8 +141,17 @@ router.post('/:id/steps', async (req, res, next) => {
       return next(new AppError(ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid body'))
     }
 
-    const [station] = await db.select({ id: stations.id }).from(stations).where(eq(stations.id, parsed.data.stationId)).limit(1)
+    const [station] = await db
+      .select({ id: stations.id, departmentId: stations.departmentId })
+      .from(stations)
+      .where(eq(stations.id, parsed.data.stationId))
+      .limit(1)
     if (!station) return next(new AppError(ErrorCode.NOT_FOUND, '站點不存在', 404))
+
+    // Department consistency check
+    if (station.departmentId !== route.departmentId) {
+      return next(new AppError(ErrorCode.WRONG_DEPARTMENT, '站點與路由不屬於同一部門'))
+    }
 
     const [step] = await db
       .insert(processSteps)
@@ -164,6 +177,27 @@ router.patch('/:id/steps/:stepId', async (req, res, next) => {
     const parsed = StepSchema.partial().safeParse(req.body)
     if (!parsed.success) {
       return next(new AppError(ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid body'))
+    }
+
+    // If stationId is being changed, validate department consistency
+    if (parsed.data.stationId !== undefined) {
+      const [route] = await db
+        .select({ departmentId: processRoutes.departmentId })
+        .from(processRoutes)
+        .where(eq(processRoutes.id, id))
+        .limit(1)
+      if (!route) return next(new AppError(ErrorCode.NOT_FOUND, '路由不存在', 404))
+
+      const [station] = await db
+        .select({ departmentId: stations.departmentId })
+        .from(stations)
+        .where(eq(stations.id, parsed.data.stationId))
+        .limit(1)
+      if (!station) return next(new AppError(ErrorCode.NOT_FOUND, '站點不存在', 404))
+
+      if (station.departmentId !== route.departmentId) {
+        return next(new AppError(ErrorCode.WRONG_DEPARTMENT, '站點與路由不屬於同一部門'))
+      }
     }
 
     const updates: Record<string, unknown> = {}

@@ -167,15 +167,40 @@ router.post('/', async (req, res, next) => {
   }
 })
 
+// ── Work order state machine ──────────────────────────────────────────────────
+const STATUS_TRANSITIONS: Record<string, string[]> = {
+  pending: ['in_progress', 'cancelled'],
+  in_progress: ['completed', 'cancelled'],
+  // completed, cancelled, split → 不允許轉換
+}
+
 // PATCH /api/admin/work-orders/:id/status
 router.patch('/:id/status', async (req, res, next) => {
   try {
     const { id } = req.params as { id: string }
     const { status } = req.body as { status?: string }
 
-    const allowed = ['pending', 'in_progress', 'completed', 'cancelled']
-    if (!status || !allowed.includes(status)) {
-      return next(new AppError(ErrorCode.VALIDATION_ERROR, `status 必須是 ${allowed.join(' / ')}`))
+    const allStatuses = ['pending', 'in_progress', 'completed', 'cancelled']
+    if (!status || !allStatuses.includes(status)) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, `status 必須是 ${allStatuses.join(' / ')}`))
+    }
+
+    // Fetch current work order
+    const [wo] = await db
+      .select({ id: workOrders.id, status: workOrders.status })
+      .from(workOrders)
+      .where(eq(workOrders.id, id))
+      .limit(1)
+
+    if (!wo) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
+
+    // Validate state transition
+    const allowedNext = STATUS_TRANSITIONS[wo.status]
+    if (!allowedNext || !allowedNext.includes(status)) {
+      return next(new AppError(
+        ErrorCode.VALIDATION_ERROR,
+        `工單狀態 ${wo.status} 不允許轉換為 ${status}`,
+      ))
     }
 
     const [updated] = await db
@@ -183,8 +208,6 @@ router.patch('/:id/status', async (req, res, next) => {
       .set({ status, updatedAt: new Date() })
       .where(eq(workOrders.id, id))
       .returning()
-
-    if (!updated) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
 
     sendSuccess(res, updated)
   } catch (err) {

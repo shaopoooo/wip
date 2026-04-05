@@ -187,6 +187,82 @@ docker compose exec backend npm run seed
 ### 🖥️ M4 — 管理後台
 > 驗收：建產品 → 建路由 → 建工單 → 印 QR Code → 掃描 → 完工，全閉環
 
+#### 驗收步驟
+
+**前置**
+```bash
+docker compose up -d --build
+docker compose logs -f backend   # 等看到 "listening on port 3000"
+docker compose exec backend npm run seed
+```
+
+**1. 登入管理後台**
+- 開啟 `http://localhost:5173/admin/login`
+- 輸入 seed 預設帳密（從 `.env.dev` 確認 `ADMIN_USERNAME` / `ADMIN_PASSWORD`）
+- 確認跳轉至 `/admin/work-orders`，左側 sidebar 顯示 8 個選單項目
+- 重整頁面確認維持登入狀態（refresh token 自動補發）
+
+**2. 新增組別**
+- 進入「組別管理」→ 選部門（A 線）→ 點「+ 新增組別」
+- 填寫名稱（測試組 Ω）→ 確認儲存成功、列表出現新項目
+- 點「編輯」→ 修改說明 → 確認更新成功
+- 點「停用」→ 確認從列表消失（soft delete，`is_active = false`）
+
+**3. 新增站點**
+- 進入「站點管理」→ 選部門 A 線 → 點「+ 新增站點」
+- 填站點名稱（測試站 T1）、代碼（T-01）、選組別 → 儲存
+- 確認列表出現新站點，組別欄顯示正確組名
+
+**4. 新增產品型號**
+- 進入「產品型號」→ 選部門 A 線 → 點「+ 新增產品」
+- 填寫產品名稱（FPC 測試板）、物料編號（FPC-TEST-001）→ 儲存
+- 確認列表出現新產品
+
+**5. 建立工序路由 + 步驟**
+- 進入「工序路由」→ 選部門 A 線 → 點「+ 新增路由」
+- 填路由名稱（測試路由 R1）、版本號 1 → 儲存
+- 點「管理步驟」→ 確認步驟管理 Modal 開啟
+- 下拉選站點（測試站 T1）→ 標準工時填 120 → 點「新增」
+- 確認步驟出現在列表，顯示站點名稱與標準工時
+- 再新增 1 個步驟（選另一已存在站點）
+- 點 ▲▼ 調整順序 → 確認 stepOrder 變動
+
+**6. 建立工單**
+- 進入「工單管理」→ 點「+ 建立工單」
+- 選部門（A 線）→ 選產品（FPC 測試板）→ 選路由（測試路由 R1）
+- 填數量 50、交期今天 → 點「建立」
+- 確認工單號格式符合 `WO-A-{YEAR}-{SEQ}`（例 `WO-A-2026-003`）
+- 確認工單出現在列表，狀態為「待生產」
+
+**7. QR Code 預覽 + 列印**
+- 點工單號進入詳情頁
+- 確認「QR Code」區塊顯示 QR 圖片（base64 PNG）
+- 點「列印此工單」→ 確認瀏覽器開啟列印預覽，QR Code 可見
+- 回到工單列表，勾選剛建立的工單 → 點「批次列印」
+- 確認跳轉至 `/admin/print?ids=...`，顯示 QR Code 卡片
+
+**8. 掃描閉環驗證**
+- 開啟 `http://localhost:5173/setup`（若尚未綁定）→ 選部門 A 線 → 完成設定
+- 進入 `/scan` → 輸入工單號（步驟 6 所建立的）→ 確認出現「入站確認」Modal
+  - WorkOrderCard 顯示「FPC 測試板」、物料編號 FPC-TEST-001
+  - 工序進度顯示第 1 站
+- 點「確認入站」→ 成功畫面
+- 再次輸入同工單號 → 確認出現「出站確認」Modal → 確認出站
+- 回到管理後台工單詳情頁 → 確認站點歷程出現 check-in / check-out 紀錄
+- 依序完成路由所有站點（或驗證自動補填邏輯）
+- 末站出站後 → 確認工單狀態更新為「已完成」
+
+**9. 管理員帳號 / 角色管理**
+- 進入「角色管理」→ 新增角色（操作員）→ 確認儲存
+- 進入「管理員帳號」→ 新增帳號（test_user / Test@1234，指定操作員角色）→ 確認儲存
+- 點「停用」→ 確認帳號列表顯示為停用狀態
+- 點「刪除」→ 確認帳號消失
+
+**10. 登出**
+- 點 sidebar 底部「登出」→ 確認跳回 `/admin/login`
+- 重整頁面確認不會自動登入（cookie 已清除）
+- 直接訪問 `http://localhost:5173/admin/work-orders` → 確認被重導至 `/admin/login`
+
 #### Backend — 管理後台認證 API
 - [x] `POST /api/admin/auth/login`（帳密登入，回傳 JWT access token + refresh token）
 - [x] `POST /api/admin/auth/refresh`（用 refresh token 換新 access token）
@@ -232,6 +308,55 @@ docker compose exec backend npm run seed
 - [x] 工單詳情頁（站點歷程進度）
 - [x] QR Code 預覽 + 單張列印
 - [x] 批次列印頁（`/admin/print?ids=...`）
+
+---
+
+### 🔧 Bugfix / 改進（跨 Milestone）
+
+#### P0 — 阻斷性修正
+- [x] Nginx `proxy_pass` service name 錯誤（`app` → `backend`），修正 `nginx/nginx.conf`
+- [x] JWT TTL 寫死 `8h`，改為讀取環境變數 `JWT_ACCESS_EXPIRES_IN` / `JWT_REFRESH_EXPIRES_IN`（`AuthService.ts` + `auth.ts`）
+
+#### P1 — 規範/安全修正
+- [x] CORS_ORIGIN `.env.dev` 修正為 `http://localhost:5173`（含 protocol + port）
+- [x] Cookie `sameSite` 開發環境改為 `lax`，production 維持 `strict`
+- [x] Frontend Dockerfile `npm install --legacy-peer-deps` → `npm ci`（符合安全規範）
+- [x] 補建 `.env.dev.example`（development 範本，不含真實密碼）
+- [x] Cookie `maxAge` 改為從環境變數動態計算（`parseTtlMs`），與 JWT TTL 一致
+
+#### 系統設計改進（已完成）
+- [x] 掃描並發控制：`ScanService.scan()` 整合為單一 transaction + `SELECT ... FOR UPDATE` 鎖定工單列
+- [x] Idempotency Key：`POST /api/scan` 支援 `idempotencyKey` 參數，後端 in-memory cache 60 秒去重
+- [x] 前端網路重試：掃描請求自動重試 2 次（僅限網路錯誤），搭配 idempotency key 確保安全
+- [x] 新增 `NETWORK_ERROR` 中文錯誤訊息
+
+#### Bug 修正 — 高優先
+- [x] 工單狀態轉換無驗證：`PATCH /api/admin/work-orders/:id/status` 允許任意狀態轉換（如 completed→pending），需實作 state machine
+- [x] 工序步驟跨部門指派：新增/修改步驟未驗證 station.department_id 與 route.department_id 一致
+
+#### Bug 修正 — 中優先
+- [ ] 刪除工序步驟觸發 FK 錯誤：`station_logs.step_id` 參照存在時 DELETE 回 500，改為先檢查或 soft-delete
+- [ ] Admin 前端 raw fetch：`admin.ts` 多處用 `fetch()` 呼叫公開 API，未經統一錯誤處理
+- [ ] 前端靜默吞錯：`WorkOrdersPage` 等頁面 `.catch(() => {})` 吞掉載入錯誤，使用者看到空白無提示
+- [ ] 分頁缺 total count：工單列表 API 未回傳 `total` / `totalPages`，前端無法顯示完整分頁資訊
+- [ ] 管理操作缺 audit log：管理後台 CRUD / 狀態變更未寫入 `audit_logs`（掃描側有，管理側沒有）
+
+#### Bug 修正 — 低優先
+- [ ] 批次列印 `Promise.all` 一筆失敗全部失敗，改用 `Promise.allSettled()`
+- [ ] `process_steps.step_order` 缺唯一約束，同路由可有重複 step_order
+- [ ] 前端刪除/建立按鈕無 loading 防連點
+
+#### P2 — 待處理
+- [ ] 拆單 API 路徑改到 `/api/admin/work-orders/:id/split`（需 JWT 認證）
+- [ ] 登入端點 `POST /api/admin/auth/login` 加入 rate limiting（IP-based，建議 5 次/分鐘）
+- [ ] CLAUDE.md devices schema 同步更新（補上 `department_id`、`station_id` nullable 變更）
+
+#### P3 — 待處理
+- [ ] 補 `ScanService` 單元測試（核心業務邏輯：check-in / check-out / 跳站補填 / 並發 / idempotency）
+- [ ] 工單序號產生加入並發保護（`SELECT MAX(...) FOR UPDATE` 或 PostgreSQL sequence + retry）
+- [ ] QR Code 內容加入簡易 HMAC 簽名防偽造
+- [ ] DB 連線池 `max` 改為環境變數控制（`DB_POOL_MAX`，production 建議 20）
+- [ ] Audit log 長期策略：Phase 2 啟用 PostgreSQL range partitioning by `created_at`（按月分區）
 
 ---
 

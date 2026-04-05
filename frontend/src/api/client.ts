@@ -23,6 +23,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   NOT_FOUND: '找不到對應資料',
   VALIDATION_ERROR: '資料格式錯誤',
   INTERNAL_ERROR: '伺服器錯誤，請稍後再試',
+  NETWORK_ERROR: '網路連線異常，請確認 Wi-Fi 後重試',
 }
 
 export function toChineseError(code: string, fallback: string): string {
@@ -31,25 +32,43 @@ export function toChineseError(code: string, fallback: string): string {
 
 async function request<T>(
   path: string,
-  options: RequestInit & { deviceId?: string } = {},
+  options: RequestInit & { deviceId?: string; retry?: number } = {},
 ): Promise<T> {
-  const { deviceId, ...init } = options
+  const { deviceId, retry = 0, ...init } = options
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(init.headers as Record<string, string>),
   }
   if (deviceId) headers['x-device-id'] = deviceId
 
-  const res = await fetch(`${BASE}${path}`, { ...init, headers })
-  const json = (await res.json()) as { success: boolean; data?: T; error?: { code: string; message: string } }
+  const maxAttempts = retry + 1
 
-  if (!json.success || !res.ok) {
-    const code = json.error?.code ?? 'INTERNAL_ERROR'
-    const message = json.error?.message ?? '未知錯誤'
-    throw new ApiError(code, toChineseError(code, message), res.status)
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const res = await fetch(`${BASE}${path}`, { ...init, headers })
+      const json = (await res.json()) as { success: boolean; data?: T; error?: { code: string; message: string } }
+
+      if (!json.success || !res.ok) {
+        const code = json.error?.code ?? 'INTERNAL_ERROR'
+        const message = json.error?.message ?? '未知錯誤'
+        throw new ApiError(code, toChineseError(code, message), res.status)
+      }
+
+      return json.data as T
+    } catch (err) {
+      // Only retry on network errors, not on business logic errors
+      if (err instanceof ApiError) throw err
+      if (attempt < maxAttempts - 1) {
+        await new Promise(r => setTimeout(r, 1000))
+        continue
+      }
+      // All retries exhausted — network failure
+      throw new ApiError('NETWORK_ERROR', toChineseError('NETWORK_ERROR', '網路連線異常'), 0)
+    }
   }
 
-  return json.data as T
+  // Unreachable, but satisfies TypeScript
+  throw new ApiError('NETWORK_ERROR', toChineseError('NETWORK_ERROR', '網路連線異常'), 0)
 }
 
 export const api = {
@@ -59,8 +78,8 @@ export const api = {
       : path
     return request<T>(url, { method: 'GET', deviceId: opts?.deviceId })
   },
-  post: <T>(path: string, body: unknown, opts?: { deviceId?: string }) =>
-    request<T>(path, { method: 'POST', body: JSON.stringify(body), deviceId: opts?.deviceId }),
-  patch: <T>(path: string, body: unknown, opts?: { deviceId?: string }) =>
-    request<T>(path, { method: 'PATCH', body: JSON.stringify(body), deviceId: opts?.deviceId }),
+  post: <T>(path: string, body: unknown, opts?: { deviceId?: string; retry?: number }) =>
+    request<T>(path, { method: 'POST', body: JSON.stringify(body), deviceId: opts?.deviceId, retry: opts?.retry }),
+  patch: <T>(path: string, body: unknown, opts?: { deviceId?: string; retry?: number }) =>
+    request<T>(path, { method: 'PATCH', body: JSON.stringify(body), deviceId: opts?.deviceId, retry: opts?.retry }),
 }

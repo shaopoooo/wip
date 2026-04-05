@@ -85,8 +85,10 @@ export interface StationLog {
 export const scanApi = {
   preview: (orderNumber: string, deviceId: string) =>
     api.get<ScanPreview>('/scan/preview', { params: { orderNumber }, deviceId }),
-  scan: (input: { orderNumber: string; actualQtyOut?: number; defectQty?: number }, deviceId: string) =>
-    api.post<ScanResult>('/scan', input, { deviceId }),
+  scan: (input: { orderNumber: string; actualQtyOut?: number; defectQty?: number }, deviceId: string) => {
+    const idempotencyKey = crypto.randomUUID()
+    return api.post<ScanResult>('/scan', { ...input, idempotencyKey }, { deviceId, retry: 2 })
+  },
   logs: (orderNumber: string, deviceId: string) =>
     api.get<{ orderNumber: string; logs: StationLog[] }>('/scan/logs', { params: { orderNumber }, deviceId }),
   correct: (logId: string, input: { checkInTime?: string; checkOutTime?: string; reason: string }, deviceId: string) =>

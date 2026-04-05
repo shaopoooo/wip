@@ -7,7 +7,7 @@ WORKDIR /app
 
 # 先複製 package*.json 以利用 Docker 快取機制
 COPY package*.json ./
-RUN npm install --legacy-peer-deps
+RUN npm ci
 
 # 複製其餘原始碼
 COPY . .

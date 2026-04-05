@@ -17,6 +17,8 @@ const ScanBodySchema = z.object({
   actualQtyOut: z.number().int().min(0).optional(),
   /** Check-out only — defaults to 0 */
   defectQty: z.number().int().min(0).optional(),
+  /** Client-generated UUID for retry deduplication */
+  idempotencyKey: z.string().uuid().optional(),
 })
 
 const CorrectionBodySchema = z.object({
@@ -166,6 +168,7 @@ router.post('/', deviceAuth, async (req, res, next) => {
       stationId: parsed.data.stationId,
       actualQtyOut: parsed.data.actualQtyOut,
       defectQty: parsed.data.defectQty,
+      idempotencyKey: parsed.data.idempotencyKey,
     })
 
     sendSuccess(res, result)

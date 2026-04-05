@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken'
+import jwt, { type SignOptions } from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import { eq } from 'drizzle-orm'
 import { db } from '../models/db'
@@ -17,8 +17,8 @@ function getSecret(): string {
   return s
 }
 
-const ACCESS_TTL = '8h'
-const REFRESH_TTL = '7d'
+const ACCESS_TTL = (process.env['JWT_ACCESS_EXPIRES_IN'] ?? '8h') as SignOptions['expiresIn']
+const REFRESH_TTL = (process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d') as SignOptions['expiresIn']
 
 export class AuthService {
   // ── Login ─────────────────────────────────────────────────────────────────

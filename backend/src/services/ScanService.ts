@@ -1,5 +1,5 @@
 import { and, desc, eq, gt, isNotNull, isNull } from 'drizzle-orm'
-import { db } from '../models/db'
+import { db, type Db } from '../models/db'
 import {
   auditLogs,
   devices,
@@ -17,6 +17,7 @@ type ProcessStep = typeof processSteps.$inferSelect
 type StationLog = typeof stationLogs.$inferSelect
 type Device = typeof devices.$inferSelect
 type Station = typeof stations.$inferSelect
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
 
 // ── Public interface ───────────────────────────────────────────────────────────
 
@@ -28,6 +29,8 @@ export interface ScanInput {
   actualQtyOut?: number
   /** Check-out only. Defaults to 0. */
   defectQty?: number
+  /** Client-generated UUID for retry deduplication */
+  idempotencyKey?: string
 }
 
 export interface ScanResult {
@@ -47,113 +50,154 @@ export interface CorrectionInput {
 
 const DEDUP_SECONDS = 30
 
+// ── Idempotency cache (single-instance, in-memory) ──────────────────────────
+
+interface CachedResult { result: ScanResult; expiresAt: number }
+const idempotencyCache = new Map<string, CachedResult>()
+const IDEMPOTENCY_TTL_MS = 60_000 // 60 seconds
+
+function pruneIdempotencyCache() {
+  const now = Date.now()
+  for (const [key, entry] of idempotencyCache) {
+    if (entry.expiresAt < now) idempotencyCache.delete(key)
+  }
+}
+
+// Prune every 5 minutes
+setInterval(pruneIdempotencyCache, 5 * 60_000).unref()
+
 export class ScanService {
   // ── Main entry point ─────────────────────────────────────────────────────────
 
   static async scan(input: ScanInput): Promise<ScanResult> {
-    const { workOrderId, device } = input
+    const { workOrderId, device, idempotencyKey } = input
 
-    // 1. Fetch & validate work order
-    const [wo] = await db
-      .select()
-      .from(workOrders)
-      .where(eq(workOrders.id, workOrderId))
-      .limit(1)
-
-    if (!wo) throw new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404)
-
-    if (wo.status === 'cancelled' || wo.status === 'completed') {
-      throw new AppError(ErrorCode.ORDER_CLOSED, `工單已${wo.status === 'cancelled' ? '取消' : '完工'}`)
-    }
-    if (wo.status === 'split') {
-      throw new AppError(ErrorCode.ORDER_ALREADY_SPLIT, '此工單已拆分，請掃描子單')
+    // Idempotency: return cached result if key was already processed
+    if (idempotencyKey) {
+      const cached = idempotencyCache.get(idempotencyKey)
+      if (cached && cached.expiresAt > Date.now()) {
+        return cached.result
+      }
     }
 
-    // 2. Fetch route steps ordered by step_order
-    const steps = await db
-      .select()
-      .from(processSteps)
-      .where(eq(processSteps.routeId, wo.routeId))
-      .orderBy(processSteps.stepOrder)
+    // Wrap entire scan in a transaction with row-level lock on work order
+    const result = await db.transaction(async (tx) => {
+      // 1. Fetch & lock work order row (serializes concurrent scans on same WO)
+      const [wo] = await tx
+        .select()
+        .from(workOrders)
+        .where(eq(workOrders.id, workOrderId))
+        .limit(1)
+        .for('update')
 
-    if (steps.length === 0) {
-      throw new AppError(ErrorCode.NOT_FOUND, '工序路由無步驟', 500)
+      if (!wo) throw new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404)
+
+      if (wo.status === 'cancelled' || wo.status === 'completed') {
+        throw new AppError(ErrorCode.ORDER_CLOSED, `工單已${wo.status === 'cancelled' ? '取消' : '完工'}`)
+      }
+      if (wo.status === 'split') {
+        throw new AppError(ErrorCode.ORDER_ALREADY_SPLIT, '此工單已拆分，請掃描子單')
+      }
+
+      // 2. Fetch route steps ordered by step_order
+      const steps = await tx
+        .select()
+        .from(processSteps)
+        .where(eq(processSteps.routeId, wo.routeId))
+        .orderBy(processSteps.stepOrder)
+
+      if (steps.length === 0) {
+        throw new AppError(ErrorCode.NOT_FOUND, '工序路由無步驟', 500)
+      }
+
+      // 3. Determine the target station
+      const targetStationId = await this.determineTargetStationIdTx(tx, wo.id, steps, input.stationId)
+
+      const [station] = await tx
+        .select()
+        .from(stations)
+        .where(eq(stations.id, targetStationId))
+        .limit(1)
+
+      if (!station) throw new AppError(ErrorCode.NOT_FOUND, '目標設備站點不存在', 500)
+
+      // Department isolation check
+      if (device.departmentId !== wo.departmentId) {
+        throw new AppError(ErrorCode.WRONG_DEPARTMENT, '此裝置不屬於本產線，無法報工此工單')
+      }
+
+      // 4. Is there an open (in-progress) log for this WO at this station?
+      const [openLog] = await tx
+        .select()
+        .from(stationLogs)
+        .where(
+          and(
+            eq(stationLogs.workOrderId, workOrderId),
+            eq(stationLogs.stationId, targetStationId),
+            isNull(stationLogs.checkOutTime),
+          ),
+        )
+        .limit(1)
+
+      if (openLog) {
+        return this.doCheckOut({ tx, wo, device, station, steps, openLog, input })
+      }
+
+      return this.doCheckIn({ tx, wo, device, station, steps, input })
+    })
+
+    // Cache result for idempotency
+    if (idempotencyKey) {
+      idempotencyCache.set(idempotencyKey, { result, expiresAt: Date.now() + IDEMPOTENCY_TTL_MS })
     }
 
-    // 3. Determine the target station
-    const targetStationId = await this.determineTargetStationId(wo.id, steps, input.stationId)
-
-    const [station] = await db
-      .select()
-      .from(stations)
-      .where(eq(stations.id, targetStationId))
-      .limit(1)
-
-    if (!station) throw new AppError(ErrorCode.NOT_FOUND, '目標設備站點不存在', 500)
-
-    // Department isolation check (Device's department vs Station's department)
-    // Actually, Device department should match WO's department.
-    if (device.departmentId !== wo.departmentId) {
-      throw new AppError(ErrorCode.WRONG_DEPARTMENT, '此裝置不屬於本產線，無法報工此工單')
-    }
-
-    // 4. Is there an open (in-progress) log for this WO at this station?
-    const [openLog] = await db
-      .select()
-      .from(stationLogs)
-      .where(
-        and(
-          eq(stationLogs.workOrderId, workOrderId),
-          eq(stationLogs.stationId, targetStationId),
-          isNull(stationLogs.checkOutTime),
-        ),
-      )
-      .limit(1)
-
-    if (openLog) {
-      return this.doCheckOut({ wo, device, station, steps, openLog, input })
-    }
-
-    return this.doCheckIn({ wo, device, station, steps, input })
+    return result
   }
 
   // ── Infer Target Station ──────────────────────────────────────────────────────
 
+  /** Used by preview endpoint (no transaction needed) */
   static async determineTargetStationId(workOrderId: string, steps: ProcessStep[], overrideStationId?: string): Promise<string> {
+    return this._determineTargetStation(db, workOrderId, steps, overrideStationId)
+  }
+
+  /** Used inside scan transaction (shares the FOR UPDATE lock scope) */
+  private static async determineTargetStationIdTx(tx: Tx, workOrderId: string, steps: ProcessStep[], overrideStationId?: string): Promise<string> {
+    return this._determineTargetStation(tx, workOrderId, steps, overrideStationId)
+  }
+
+  private static async _determineTargetStation(q: Db | Tx, workOrderId: string, steps: ProcessStep[], overrideStationId?: string): Promise<string> {
     if (overrideStationId) return overrideStationId
 
-    // Auto-infer based on progress
-    const completedLogs = await db
+    const completedLogs = await q
       .select()
       .from(stationLogs)
       .where(and(eq(stationLogs.workOrderId, workOrderId), isNotNull(stationLogs.checkOutTime)))
       .orderBy(desc(stationLogs.checkInTime))
 
-    const activeLog = await db
+    const activeLog = await q
       .select()
       .from(stationLogs)
       .where(and(eq(stationLogs.workOrderId, workOrderId), isNull(stationLogs.checkOutTime)))
       .limit(1)
 
-    // If there's an open log, that is the current station
     if (activeLog && activeLog.length > 0) {
       return activeLog[0]!.stationId
     }
 
-    // Otherwise, find the next uncompleted step
     const completedStepIds = new Set(completedLogs.map((l) => l.stepId))
     const nextStep = steps.find(s => !completedStepIds.has(s.id))
     if (nextStep) {
       return nextStep.stationId
     }
 
-    // If all steps completed, but work order somehow not marked completed, guess last station
     return steps[steps.length - 1]!.stationId
   }
 
   // ── Check-out ─────────────────────────────────────────────────────────────────
 
   private static async doCheckOut({
+    tx,
     wo,
     device,
     station,
@@ -161,6 +205,7 @@ export class ScanService {
     openLog,
     input,
   }: {
+    tx: Tx
     wo: WorkOrder
     device: Device
     station: Station
@@ -176,48 +221,46 @@ export class ScanService {
     const lastStep = steps[steps.length - 1]
     const isLastStep = lastStep?.id === openLog.stepId
 
-    const updatedLog = await db.transaction(async (tx) => {
-      const [log] = await tx
-        .update(stationLogs)
-        .set({ checkOutTime: now, actualQtyOut, defectQty, status: 'completed' })
-        .where(eq(stationLogs.id, openLog.id))
-        .returning()
+    const [updatedLog] = await tx
+      .update(stationLogs)
+      .set({ checkOutTime: now, actualQtyOut, defectQty, status: 'completed' })
+      .where(eq(stationLogs.id, openLog.id))
+      .returning()
 
-      if (isLastStep) {
-        await tx
-          .update(workOrders)
-          .set({ status: 'completed', updatedAt: now })
-          .where(eq(workOrders.id, wo.id))
-      }
+    if (isLastStep) {
+      await tx
+        .update(workOrders)
+        .set({ status: 'completed', updatedAt: now })
+        .where(eq(workOrders.id, wo.id))
+    }
 
-      await tx.insert(auditLogs).values({
-        entityType: 'station_log',
-        entityId: openLog.id,
-        action: 'check_out',
-        changes: {
-          checkOutTime: { old: null, new: now.toISOString() },
-          actualQtyOut: { old: null, new: actualQtyOut },
-          defectQty: { old: openLog.defectQty, new: defectQty },
-          status: { old: 'in_progress', new: 'completed' },
-        },
-        deviceId: device.id,
-      })
-
-      return log!
+    await tx.insert(auditLogs).values({
+      entityType: 'station_log',
+      entityId: openLog.id,
+      action: 'check_out',
+      changes: {
+        checkOutTime: { old: null, new: now.toISOString() },
+        actualQtyOut: { old: null, new: actualQtyOut },
+        defectQty: { old: openLog.defectQty, new: defectQty },
+        status: { old: 'in_progress', new: 'completed' },
+      },
+      deviceId: device.id,
     })
 
-    return { action: 'check_out', log: updatedLog, autoFilledCount: 0, workOrderCompleted: isLastStep }
+    return { action: 'check_out', log: updatedLog!, autoFilledCount: 0, workOrderCompleted: isLastStep }
   }
 
   // ── Check-in ──────────────────────────────────────────────────────────────────
 
   private static async doCheckIn({
+    tx,
     wo,
     device,
     station,
     steps,
     input,
   }: {
+    tx: Tx
     wo: WorkOrder
     device: Device
     station: Station
@@ -234,7 +277,7 @@ export class ScanService {
 
     // 30-second dedup
     const cutoff = new Date(now.getTime() - DEDUP_SECONDS * 1000)
-    const [recentLog] = await db
+    const [recentLog] = await tx
       .select({ id: stationLogs.id })
       .from(stationLogs)
       .where(
@@ -251,7 +294,7 @@ export class ScanService {
     }
 
     // Completed logs for this work order
-    const completedLogs = await db
+    const completedLogs = await tx
       .select()
       .from(stationLogs)
       .where(and(eq(stationLogs.workOrderId, wo.id), isNotNull(stationLogs.checkOutTime)))
@@ -269,70 +312,66 @@ export class ScanService {
     const lastCompletedLog = completedLogs[0]
     const autoFillBaseTime = lastCompletedLog?.checkOutTime != null ? lastCompletedLog.checkOutTime : now
 
-    const newLog = await db.transaction(async (tx) => {
-      // Auto-fill gap stations
-      for (const gapStep of gapSteps) {
-        const [filled] = await tx
-          .insert(stationLogs)
-          .values({
-            workOrderId: wo.id,
-            stationId: gapStep.stationId,
-            stepId: gapStep.id,
-            deviceId: device.id,
-            checkInTime: autoFillBaseTime,
-            checkOutTime: now,
-            actualQtyIn: wo.plannedQty,
-            actualQtyOut: wo.plannedQty,
-            defectQty: 0,
-            status: 'auto_filled',
-          })
-          .returning()
-
-        await tx.insert(auditLogs).values({
-          entityType: 'station_log',
-          entityId: filled!.id,
-          action: 'check_in',
-          changes: { autoFill: true, gapStep: gapStep.stepOrder },
-          deviceId: device.id,
-        })
-      }
-
-      // Check-in for current station
-      const [log] = await tx
+    // Auto-fill gap stations
+    for (const gapStep of gapSteps) {
+      const [filled] = await tx
         .insert(stationLogs)
         .values({
           workOrderId: wo.id,
-          stationId: station.id,
-          stepId: currentStep.id,
+          stationId: gapStep.stationId,
+          stepId: gapStep.id,
           deviceId: device.id,
-          checkInTime: now,
+          checkInTime: autoFillBaseTime,
+          checkOutTime: now,
           actualQtyIn: wo.plannedQty,
+          actualQtyOut: wo.plannedQty,
           defectQty: 0,
-          status: 'in_progress',
+          status: 'auto_filled',
         })
         .returning()
 
-      if (wo.status === 'pending') {
-        await tx
-          .update(workOrders)
-          .set({ status: 'in_progress', updatedAt: now })
-          .where(eq(workOrders.id, wo.id))
-      }
-
       await tx.insert(auditLogs).values({
         entityType: 'station_log',
-        entityId: log!.id,
+        entityId: filled!.id,
         action: 'check_in',
-        changes: { stationId: station.id, checkInTime: now.toISOString() },
+        changes: { autoFill: true, gapStep: gapStep.stepOrder },
         deviceId: device.id,
       })
+    }
 
-      return log!
+    // Check-in for current station
+    const [newLog] = await tx
+      .insert(stationLogs)
+      .values({
+        workOrderId: wo.id,
+        stationId: station.id,
+        stepId: currentStep.id,
+        deviceId: device.id,
+        checkInTime: now,
+        actualQtyIn: wo.plannedQty,
+        defectQty: 0,
+        status: 'in_progress',
+      })
+      .returning()
+
+    if (wo.status === 'pending') {
+      await tx
+        .update(workOrders)
+        .set({ status: 'in_progress', updatedAt: now })
+        .where(eq(workOrders.id, wo.id))
+    }
+
+    await tx.insert(auditLogs).values({
+      entityType: 'station_log',
+      entityId: newLog!.id,
+      action: 'check_in',
+      changes: { stationId: station.id, checkInTime: now.toISOString() },
+      deviceId: device.id,
     })
 
     return {
       action: 'check_in',
-      log: newLog,
+      log: newLog!,
       autoFilledCount: gapSteps.length,
       workOrderCompleted: false,
     }
