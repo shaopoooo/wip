@@ -15,6 +15,13 @@
       "when": 1775122298666,
       "tag": "0001_normal_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1775482770252,
+      "tag": "0002_previous_nick_fury",
+      "breakpoints": true
     }
   ]
 }

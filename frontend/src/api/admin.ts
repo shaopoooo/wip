@@ -48,7 +48,21 @@ export interface Department { id: string; name: string; code: string }
 
 export interface Group {
   id: string; departmentId: string; name: string; code: string | null
-  description: string | null; sortOrder: number; isActive: boolean; createdAt: string
+  stage: string | null; description: string | null; sortOrder: number; isActive: boolean; createdAt: string
+}
+
+export interface Customer {
+  id: string; code: string; name: string | null
+  costFileCount: number; needsNameMapping: boolean; isActive: boolean
+  createdAt: string; updatedAt: string
+}
+
+export interface Vendor {
+  id: string; token: string; normalizedName: string
+  sourceFlags: string | null; scheduleVendorCount: number
+  shippingVendorCount: number; statusTokenCount: number
+  needsManualReview: boolean; isActive: boolean
+  createdAt: string; updatedAt: string
 }
 
 export interface Station {
@@ -127,9 +141,9 @@ export const departmentsApi = {
 
 export const groupsApi = {
   listByDept: (departmentId: string) => fetch(`/api/departments/${departmentId}/groups`).then(r => r.json()).then(j => j.data as Group[]),
-  create: (data: { departmentId: string; name: string; code?: string | null; description?: string | null; sortOrder?: number }) =>
+  create: (data: { departmentId: string; name: string; code?: string | null; stage?: string | null; description?: string | null; sortOrder?: number }) =>
     post<Group>('/groups', data),
-  update: (id: string, data: Partial<{ name: string; code: string | null; description: string | null; sortOrder: number }>) =>
+  update: (id: string, data: Partial<{ name: string; code: string | null; stage: string | null; description: string | null; sortOrder: number }>) =>
     patch<Group>(`/groups/${id}`, data),
   delete: (id: string) => del<null>(`/groups/${id}`),
 }
@@ -208,4 +222,26 @@ export const workOrdersApi = {
   updateStatus: (id: string, status: string) => patch<WorkOrder>(`/work-orders/${id}/status`, { status }),
   qrcode: (id: string) => get<{ orderNumber: string; qrDataUrl: string; status: string }>(`/work-orders/${id}/qrcode`),
   print: (ids: string[]) => get<({ orderNumber: string; qrDataUrl: string; productName: string; modelNumber: string; plannedQty: number; dueDate: string | null; priority: string })[]>(`/work-orders/print?ids=${ids.join(',')}`),
+}
+
+// ── Customers ────────────────────────────────────────────────────────────────
+
+export const customersApi = {
+  list: () => get<Customer[]>('/customers'),
+  create: (data: { code: string; name?: string | null; costFileCount?: number; needsNameMapping?: boolean }) =>
+    post<Customer>('/customers', data),
+  update: (id: string, data: Partial<{ code: string; name: string | null; costFileCount: number; needsNameMapping: boolean }>) =>
+    patch<Customer>(`/customers/${id}`, data),
+  delete: (id: string) => del<null>(`/customers/${id}`),
+}
+
+// ── Vendors ──────────────────────────────────────────────────────────────────
+
+export const vendorsApi = {
+  list: () => get<Vendor[]>('/vendors'),
+  create: (data: { token: string; normalizedName: string; sourceFlags?: string | null; needsManualReview?: boolean }) =>
+    post<Vendor>('/vendors', data),
+  update: (id: string, data: Partial<{ token: string; normalizedName: string; sourceFlags: string | null; needsManualReview: boolean }>) =>
+    patch<Vendor>(`/vendors/${id}`, data),
+  delete: (id: string) => del<null>(`/vendors/${id}`),
 }

@@ -113,10 +113,11 @@ docker compose logs -f app                                                      
 ## 4. 組織層級
 
 ```
-部門 (Department)  →  組 (Group)  →  站點 (Station)
+部門 (Department)  →  組 (Group, with stage)  →  站點 (Station)
 ```
-- 兩個部門（A 線 / B 線），資料透過 `department_id` 完全隔離，共用同一套系統
-- 組：部門下的製程區域（SMT 組、插件組、測試組），用於看板分群
+- 兩個部門（A 線 S 線軟板 / B 線 Y 線軟硬結合板），資料透過 `department_id` 完全隔離，共用同一套系統
+- 組：部門下的製程階段區域（前段加工、鑽孔、線路、壓合、成型、檢驗、後加工、倉庫出貨等），用於看板分群
+- 組新增 `stage` 欄位標示製程階段分類
 - 一個站點只屬於一個組（多對一）
 
 ---
@@ -181,6 +182,12 @@ docker compose logs -f app                                                      
 ### 認證錯誤碼（/admin 專用）
 `UNAUTHORIZED` / `FORBIDDEN` / `INVALID_TOKEN` / `TOKEN_EXPIRED`
 
+### 新增 Admin API（ref 資料主檔）
+| 路由 | 方法 | 說明 |
+|------|------|------|
+| `/api/admin/customers` | GET/POST/PATCH/DELETE | 客戶 CRUD |
+| `/api/admin/vendors` | GET/POST/PATCH/DELETE | 委外廠商 CRUD |
+
 ### 安全性（見 `.claude/rules/security.md`）
 - `.env` 管理所有敏感設定，禁止 commit
 - 所有外部呼叫（DB、第三方 API）必須有 try/catch 與錯誤回傳
@@ -236,7 +243,9 @@ docker compose logs -f app                                                      
 ### 核心表清單
 ```
 departments    — 部門（兩條產線）
-groups         — 組（製程區域）
+customers      — 客戶主檔（ref seed）
+vendors        — 委外廠商主檔（ref seed）
+groups         — 組（製程區域，含 stage 分類）
 products       — 產品型號
 process_routes — 工序路由
 process_steps  — 工序步驟
@@ -260,6 +269,38 @@ departments (
 );
 ```
 
+### customers
+```sql
+customers (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code              VARCHAR(20) NOT NULL UNIQUE,   -- 客戶代碼 '022', '161' etc.
+  name              VARCHAR(200),                   -- NULL until name mapping done
+  cost_file_count   INTEGER DEFAULT 0,
+  needs_name_mapping BOOLEAN DEFAULT TRUE,
+  is_active         BOOLEAN DEFAULT TRUE,
+  created_at        TIMESTAMPTZ DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### vendors
+```sql
+vendors (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  token                 VARCHAR(100) NOT NULL UNIQUE,  -- raw vendor_token
+  normalized_name       VARCHAR(200) NOT NULL,          -- 正規化廠商名稱
+  source_flags          VARCHAR(200),
+  schedule_vendor_count INTEGER DEFAULT 0,
+  shipping_vendor_count INTEGER DEFAULT 0,
+  status_token_count    INTEGER DEFAULT 0,
+  needs_manual_review   BOOLEAN DEFAULT FALSE,
+  is_active             BOOLEAN DEFAULT TRUE,
+  created_at            TIMESTAMPTZ DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_vendors_normalized ON vendors(normalized_name);
+```
+
 ### groups
 ```sql
 groups (
@@ -267,6 +308,7 @@ groups (
   department_id UUID NOT NULL REFERENCES departments(id),
   name          VARCHAR(100) NOT NULL,
   code          VARCHAR(20),
+  stage         VARCHAR(50),            -- 製程階段分類：'前段加工', '貼合/壓合', '線路' etc.
   description   TEXT,
   sort_order    INTEGER DEFAULT 0,
   is_active     BOOLEAN DEFAULT TRUE,

@@ -5,9 +5,12 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# 先複製 package*.json 以利用 Docker 快取機制
-COPY package*.json ./
-RUN npm ci
+# 只複製 package.json（不帶 lockfile），讓 npm 在 Linux 容器內
+# 重新解析 native binding（rolldown / lightningcss / tailwindcss-oxide）。
+# macOS 產生的 lockfile 僅含 darwin binding，導致 npm ci 在 linux-arm64-musl 失敗。
+# 版本仍受 package.json 的 semver 範圍約束。
+COPY package.json ./
+RUN npm install
 
 # 複製其餘原始碼
 COPY . .

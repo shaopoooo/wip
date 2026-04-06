@@ -14,6 +14,7 @@ const GroupSchema = z.object({
   departmentId: z.string().uuid(),
   name: z.string().min(1).max(100),
   code: z.string().max(20).optional().nullable(),
+  stage: z.string().max(50).optional().nullable(),
   description: z.string().max(500).optional().nullable(),
   sortOrder: z.number().int().default(0),
 })
@@ -37,6 +38,7 @@ router.post('/', async (req, res, next) => {
         departmentId: parsed.data.departmentId,
         name: parsed.data.name,
         code: parsed.data.code ?? null,
+        stage: parsed.data.stage ?? null,
         description: parsed.data.description ?? null,
         sortOrder: parsed.data.sortOrder,
       })
@@ -61,6 +63,7 @@ router.patch('/:id', async (req, res, next) => {
     const updates: Record<string, unknown> = { updatedAt: new Date() }
     if (parsed.data.name !== undefined) updates['name'] = parsed.data.name
     if (parsed.data.code !== undefined) updates['code'] = parsed.data.code
+    if (parsed.data.stage !== undefined) updates['stage'] = parsed.data.stage
     if (parsed.data.description !== undefined) updates['description'] = parsed.data.description
     if (parsed.data.sortOrder !== undefined) updates['sortOrder'] = parsed.data.sortOrder
 

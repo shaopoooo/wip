@@ -22,6 +22,8 @@ import adminStationsRouter from './api/admin/stations'
 import adminEquipmentRouter from './api/admin/equipment'
 import adminProcessRoutesRouter from './api/admin/processRoutes'
 import adminWorkOrdersRouter from './api/admin/workOrders'
+import adminCustomersRouter from './api/admin/customers'
+import adminVendorsRouter from './api/admin/vendors'
 
 const app = express()
 const port = Number(process.env['PORT'] ?? 3000)
@@ -57,6 +59,8 @@ app.use('/api/admin/stations', adminStationsRouter)
 app.use('/api/admin/equipment', adminEquipmentRouter)
 app.use('/api/admin/process-routes', adminProcessRoutesRouter)
 app.use('/api/admin/work-orders', adminWorkOrdersRouter)
+app.use('/api/admin/customers', adminCustomersRouter)
+app.use('/api/admin/vendors', adminVendorsRouter)
 
 // ── Global error handler (must be last) ───────────────────────────────────────
 app.use(errorHandler)

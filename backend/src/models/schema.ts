@@ -25,6 +25,39 @@ export const departments = pgTable('departments', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
+// ── customers ─────────────────────────────────────────────────────────────────
+export const customers = pgTable('customers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  code: varchar('code', { length: 20 }).notNull().unique(),        // 客戶代碼 '022', '161' etc.
+  name: varchar('name', { length: 200 }),                           // NULL until name mapping done
+  costFileCount: integer('cost_file_count').default(0),
+  needsNameMapping: boolean('needs_name_mapping').default(true),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+})
+
+// ── vendors ───────────────────────────────────────────────────────────────────
+export const vendors = pgTable(
+  'vendors',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    token: varchar('token', { length: 100 }).notNull().unique(),     // raw vendor_token
+    normalizedName: varchar('normalized_name', { length: 200 }).notNull(), // 正規化廠商名稱
+    sourceFlags: varchar('source_flags', { length: 200 }),           // 'schedule_vendor,shipping_vendor'
+    scheduleVendorCount: integer('schedule_vendor_count').default(0),
+    shippingVendorCount: integer('shipping_vendor_count').default(0),
+    statusTokenCount: integer('status_token_count').default(0),
+    needsManualReview: boolean('needs_manual_review').default(false),
+    isActive: boolean('is_active').default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => [
+    index('idx_vendors_normalized').on(t.normalizedName),
+  ],
+)
+
 // ── groups ────────────────────────────────────────────────────────────────────
 export const groups = pgTable(
   'groups',
@@ -35,6 +68,7 @@ export const groups = pgTable(
       .references(() => departments.id),
     name: varchar('name', { length: 100 }).notNull(),
     code: varchar('code', { length: 20 }),
+    stage: varchar('stage', { length: 50 }),  // normalized_stage_guess: '前段加工', '貼合/壓合', etc.
     description: text('description'),
     sortOrder: integer('sort_order').default(0),
     isActive: boolean('is_active').default(true),

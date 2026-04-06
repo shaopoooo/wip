@@ -6,17 +6,27 @@
 
 ### 組織層級
 ```
-部門 (Department)  →  組 (Group)  →  站點 (Station)
-  例：A 線              SMT 組         印刷機、貼片機、迴焊爐
-                        插件組         插件站、波焊爐
-                        測試組         ICT、FCT
+部門 (Department)  →  組 (Group, with stage)  →  站點 (Station)
+  例：A 線（S 線軟板）    前段加工組              裁切
+                          鑽孔組                  CNC、二鑽
+                          鍍銅組                  PTH、PLASMA、棕化
+                          線路組                  線路、內層線路、外層線路
+                          貼合壓合組              假貼、快壓、真空快壓、熱壓補強
+                          防焊表處組              化金、LPI*1、LPI*2、撕銀箔
+                          文字印刷組              文字*1、文字*2
+                          成型加工組              NC、刀模、沖制、雷切、割半斷
+                          檢驗測試組              成檢、飛針、測試、功能測、檢大張
+                          後加工組                加工小片、SMT、貼膠帶、點膠
+                          倉庫出貨組              包裝
+      B 線（Y 線軟硬結合板） （同上結構，獨立資料隔離）
 ```
 
 ## 產業背景
 
-- **產業類型**：電子組裝（SMT、插件、波焊、測試、包裝）
-- **部門結構**：兩個獨立部門，不同產品、工序完全無交集，透過 `department_id` 做資料隔離
-- **產線規模**：每條產線各 10+ 道工序站點
+- **產業類型**：FPC 軟性電路板 / 軟硬結合板製造（裁切、鑽孔、線路、壓合、防焊、成型、檢驗、包裝）
+- **部門結構**：兩個獨立部門（S 線軟板 / Y 線軟硬結合板），透過 `department_id` 做資料隔離
+- **產線規模**：每條產線各 60+ 道工序站點，典型料號路由 15-20 步
+- **委外加工**：部分工序委外（裁切→譽景泰、化金→天隆、PTH→珈晟、CNC→雄福等）
 - **現有追蹤方式**：完全沒有（從零開始）
 - **追溯粒度**：Phase 1 工單（批次）級，Phase 2 升級序號級
 
@@ -94,6 +104,31 @@ GKE Autopilot + Cloud SQL HA + Memorystore Standard + Cloud Pub/Sub（IoT）+ Bi
 | 機密管理 | Phase 1~2 用 .env；Phase 3+ 用 Secret Manager |
 | 備份 | 每日自動備份 + 7 天保留 |
 | 域名 | 建議正式域名，如 `wip.yourfactory.com` |
+
+## 資料表 / API / Phase 對照
+
+| 資料表 | Phase | 公開 API | 管理 API (`/api/admin/*`) | 說明 |
+|--------|-------|----------|--------------------------|------|
+| `departments` | 1 | `GET /api/departments` | — | 部門（A 線 / B 線） |
+| `customers` | 1 | — | `GET/POST/PATCH/DELETE /api/admin/customers` | 客戶主檔（ref seed） |
+| `vendors` | 1 | — | `GET/POST/PATCH/DELETE /api/admin/vendors` | 委外廠商主檔（ref seed） |
+| `groups` | 1 | `GET /api/departments/:id/groups` | `POST/PATCH/DELETE /api/admin/groups` | 製程組別（含 stage 分類） |
+| `stations` | 1 | `GET /api/stations` | `POST/PATCH/DELETE /api/admin/stations` | 工站 / 製程站點 |
+| `equipment` | 1 | — | `GET/POST/PATCH/DELETE /api/admin/equipment` | 站點設備 |
+| `products` | 1 | `GET /api/products` | `POST/PATCH/DELETE /api/admin/products` | 料號 / 產品型號 |
+| `process_routes` | 1 | `GET /api/process-routes` | `POST/PATCH/DELETE /api/admin/process-routes` | 製程路由 |
+| `process_steps` | 1 | `GET /api/process-routes/:id/steps` | `POST/PATCH/DELETE /api/admin/process-routes/:id/steps` | 路由步驟 |
+| `work_orders` | 1 | `GET /api/work-orders` | `POST/PATCH /api/admin/work-orders` | 工單 |
+| `station_logs` | 1 | via `POST /api/scan` | — | 站點掃描報工紀錄 |
+| `devices` | 1 | `POST /api/devices` | — | BYOD 掃描裝置 |
+| `split_logs` | 1 | via work orders | — | 工單拆分紀錄 |
+| `defect_records` | 1 | via station logs | — | 不良品紀錄 |
+| `audit_logs` | 1 | — | — | 不可變稽核日誌 |
+| `roles` | 1 | — | `GET/POST/DELETE /api/admin/roles` | 角色管理 |
+| `admin_users` | 1 | — | `GET/POST/PATCH/DELETE /api/admin/users` | 管理員帳號 |
+
+> **ref 資料來源**：`customers` 和 `vendors` 表的初始資料來自 `ref/10_資料表/00_seed/` 目錄下前廠長整理的 Excel 結構化資料。
+> 站點、料號、路由、工單等種子資料同樣來自 ref，對應 `process_dictionary_seed.csv`、`part_master_seed.csv`、`route_template_seed.csv`、`work_order_seed.csv`。
 
 ## Phase 規劃
 
