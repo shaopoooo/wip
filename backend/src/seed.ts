@@ -8,10 +8,11 @@ import './utils/loadEnv'
 import * as fs from 'fs'
 import * as path from 'path'
 import bcrypt from 'bcryptjs'
-import { eq } from 'drizzle-orm'
+import { eq, isNull, and } from 'drizzle-orm'
 import { db } from './models/db'
 import {
   departments,
+  productCategories,
   customers,
   vendors,
   groups,
@@ -97,26 +98,27 @@ function readCanonical(filename: string): Record<string, string>[] {
   return parseCsv(path.join(REF_DIR, '01_canonical', filename))
 }
 
-/** S*, Y* prefix → department code A or B */
-function prefixToDeptCode(prefixCode: string): string {
-  return prefixCode.startsWith('Y') ? 'B' : 'A'
+
+/** S* prefix → 軟板 category code, Y* → 軟硬結合板 category code */
+function prefixToCategoryCode(prefixCode: string): string {
+  return prefixCode.startsWith('Y') ? 'RFB' : 'FPC'
 }
 
 // ── Stage definitions (production flow order) ────────────────────────────────
 
 const STAGE_DEFS: { name: string; code: string; stage: string; sortOrder: number }[] = [
-  { name: '前段加工組', code: 'PRE',  stage: '前段加工',       sortOrder: 1 },
-  { name: '鑽孔組',     code: 'DRL',  stage: '鑽孔/孔加工',    sortOrder: 2 },
-  { name: '鍍銅組',     code: 'PTH',  stage: '鍍銅/PTH',       sortOrder: 3 },
-  { name: '線路組',     code: 'CIR',  stage: '線路',           sortOrder: 4 },
-  { name: '貼合壓合組', code: 'LAM',  stage: '貼合/壓合',      sortOrder: 5 },
-  { name: '防焊表處組', code: 'SRF',  stage: '防焊/表面處理',   sortOrder: 6 },
-  { name: '文字印刷組', code: 'PRT',  stage: '文字/印刷',      sortOrder: 7 },
-  { name: '成型加工組', code: 'FRM',  stage: '成型加工',       sortOrder: 8 },
-  { name: '檢驗測試組', code: 'QC',   stage: '檢驗/測試',      sortOrder: 9 },
-  { name: '後加工組',   code: 'POST', stage: '後加工',         sortOrder: 10 },
-  { name: '倉庫出貨組', code: 'WH',   stage: '倉庫/待出貨',    sortOrder: 11 },
-  { name: '未分類',     code: 'OTH',  stage: '未分類',         sortOrder: 12 },
+  { name: '前段加工組', code: 'PRE', stage: '前段加工', sortOrder: 1 },
+  { name: '鑽孔組', code: 'DRL', stage: '鑽孔/孔加工', sortOrder: 2 },
+  { name: '鍍銅組', code: 'PTH', stage: '鍍銅/PTH', sortOrder: 3 },
+  { name: '線路組', code: 'CIR', stage: '線路', sortOrder: 4 },
+  { name: '貼合壓合組', code: 'LAM', stage: '貼合/壓合', sortOrder: 5 },
+  { name: '防焊表處組', code: 'SRF', stage: '防焊/表面處理', sortOrder: 6 },
+  { name: '文字印刷組', code: 'PRT', stage: '文字/印刷', sortOrder: 7 },
+  { name: '成型加工組', code: 'FRM', stage: '成型加工', sortOrder: 8 },
+  { name: '檢驗測試組', code: 'QC', stage: '檢驗/測試', sortOrder: 9 },
+  { name: '後加工組', code: 'POST', stage: '後加工', sortOrder: 10 },
+  { name: '倉庫出貨組', code: 'WH', stage: '倉庫/待出貨', sortOrder: 11 },
+  { name: '未分類', code: 'OTH', stage: '未分類', sortOrder: 12 },
 ]
 
 async function seed() {
@@ -147,15 +149,25 @@ async function seed() {
   await db
     .insert(departments)
     .values([
-      { name: 'S 線（軟板）', code: 'A' },
-      { name: 'Y 線（軟硬結合板）', code: 'B' },
+      { name: '主產線', code: 'MAIN' },
     ])
     .onConflictDoNothing()
 
   const deptRows = await db.select().from(departments)
-  const deptA = deptRows.find((d) => d.code === 'A')!
-  const deptB = deptRows.find((d) => d.code === 'B')!
-  const deptMap: Record<string, typeof deptA> = { A: deptA, B: deptB }
+  const deptMain = deptRows.find((d) => d.code === 'MAIN')!
+
+  // ── Product Categories ─────────────────────────────────────────────────────
+  console.log('[seed] Creating product categories...')
+  await db
+    .insert(productCategories)
+    .values([
+      { name: '軟板（FPC）', code: 'FPC', description: 'S 線軟性電路板', sortOrder: 1 },
+      { name: '軟硬結合板（RFB）', code: 'RFB', description: 'Y 線軟硬結合板', sortOrder: 2 },
+    ])
+    .onConflictDoNothing()
+
+  const allCategories = await db.select().from(productCategories)
+  const categoryMap = new Map(allCategories.map((c) => [c.code!, c]))
 
   // ── Customers ──────────────────────────────────────────────────────────────
   console.log('[seed] Creating customers...')
@@ -195,23 +207,21 @@ async function seed() {
   }
   console.log(`[seed]   → ${vendorRows.length} vendors`)
 
-  // ── Groups (by stage, per department) ──────────────────────────────────────
+  // ── Groups (by stage) ─────────────────────────────────────────────────────
   console.log('[seed] Creating groups...')
-  for (const dept of [deptA, deptB]) {
-    await db
-      .insert(groups)
-      .values(
-        STAGE_DEFS.map((s) => ({
-          departmentId: dept.id,
-          name: s.name,
-          code: s.code,
-          stage: s.stage,
-          description: `製程階段：${s.stage}`,
-          sortOrder: s.sortOrder,
-        })),
-      )
-      .onConflictDoNothing()
-  }
+  await db
+    .insert(groups)
+    .values(
+      STAGE_DEFS.map((s) => ({
+        departmentId: deptMain.id,
+        name: s.name,
+        code: s.code,
+        stage: s.stage,
+        description: `製程階段：${s.stage}`,
+        sortOrder: s.sortOrder,
+      })),
+    )
+    .onConflictDoNothing()
 
   const allGroups = await db.select().from(groups)
 
@@ -227,36 +237,31 @@ async function seed() {
   // Sort by observed_count descending for sort_order within each stage
   const stageCounters: Record<string, number> = {}
 
-  for (const dept of [deptA, deptB]) {
-    const stationValues = processDictRows.map((r) => {
-      const stage = r['normalized_stage_guess'] ?? '未分類'
-      const group = findGroup(dept.id, stage)
-      const stageKey = `${dept.id}:${stage}`
-      stageCounters[stageKey] = (stageCounters[stageKey] ?? 0) + 1
+  const stationValues = processDictRows.map((r) => {
+    const stage = r['normalized_stage_guess'] ?? '未分類'
+    const group = findGroup(deptMain.id, stage)
+    const stageKey = stage
+    stageCounters[stageKey] = (stageCounters[stageKey] ?? 0) + 1
 
-      return {
-        departmentId: dept.id,
-        groupId: group?.id ?? null,
-        name: r['raw_process_name']!,
-        code: null as string | null,
-        description: `${r['process_category_guess'] ?? 'operation'}` +
-          (r['default_vendor_guess'] ? `（常見委外：${r['default_vendor_guess']}）` : ''),
-        sortOrder: stageCounters[stageKey]!,
-      }
-    })
+    return {
+      departmentId: deptMain.id,
+      groupId: group?.id ?? null,
+      name: r['raw_process_name']!,
+      code: null as string | null,
+      description: `${r['process_category_guess'] ?? 'operation'}` +
+        (r['default_vendor_guess'] ? `（常見委外：${r['default_vendor_guess']}）` : ''),
+      sortOrder: stageCounters[stageKey]!,
+    }
+  })
 
-    await db.insert(stations).values(stationValues).onConflictDoNothing()
-  }
-  console.log(`[seed]   → ${processDictRows.length} stations per department`)
+  await db.insert(stations).values(stationValues).onConflictDoNothing()
+  console.log(`[seed]   → ${processDictRows.length} stations`)
 
   const allStations = await db.select().from(stations)
-  const stationsA = allStations.filter((s) => s.departmentId === deptA.id)
-  const stationsB = allStations.filter((s) => s.departmentId === deptB.id)
 
-  /** Find station by department and process name */
-  function findStation(deptId: string, processName: string) {
-    const list = deptId === deptA.id ? stationsA : stationsB
-    return list.find((s) => s.name === processName)
+  /** Find station by process name */
+  function findStation(_deptId: string, processName: string) {
+    return allStations.find((s) => s.name === processName)
   }
 
   // ── Equipment (1 per station) ──────────────────────────────────────────────
@@ -275,17 +280,15 @@ async function seed() {
     }
   }
 
-  for (const stationRows of [stationsA, stationsB]) {
-    const newStations = stationRows.filter((s) => !equippedStationIds.has(s.id))
-    if (newStations.length > 0) {
-      await db.insert(equipment).values(
-        newStations.map((s) => ({
-          stationId: s.id,
-          name: capacityMap.get(s.name) ?? `${s.name}設備`,
-          model: null as string | null,
-        })),
-      )
-    }
+  const newStations = allStations.filter((s) => !equippedStationIds.has(s.id))
+  if (newStations.length > 0) {
+    await db.insert(equipment).values(
+      newStations.map((s) => ({
+        stationId: s.id,
+        name: capacityMap.get(s.name) ?? `${s.name}設備`,
+        model: null as string | null,
+      })),
+    )
   }
 
   // ── Devices (2 per department) ─────────────────────────────────────────────
@@ -293,14 +296,102 @@ async function seed() {
   const existingDevices = await db.select({ departmentId: devices.departmentId }).from(devices)
   const seededDeptIds = new Set(existingDevices.map((d) => d.departmentId))
 
-  for (const [dept, stationRows] of [[deptA, stationsA], [deptB, stationsB]] as const) {
-    if (seededDeptIds.has(dept.id)) continue
-    const [s1, s2] = stationRows
-    if (!s1 || !s2) continue
-    await db.insert(devices).values([
-      { departmentId: dept.id, stationId: s1.id, name: '平板-01', deviceType: 'tablet', userAgent: 'seed/1.0', timezone: 'Asia/Taipei' },
-      { departmentId: dept.id, stationId: s2.id, name: '平板-02', deviceType: 'tablet', userAgent: 'seed/1.0', timezone: 'Asia/Taipei' },
-    ])
+  if (!seededDeptIds.has(deptMain.id)) {
+    const [s1, s2] = allStations
+    if (s1 && s2) {
+      await db.insert(devices).values([
+        { departmentId: deptMain.id, stationId: s1.id, name: '平板-01', deviceType: 'tablet', userAgent: 'seed/1.0', timezone: 'Asia/Taipei' },
+        { departmentId: deptMain.id, stationId: s2.id, name: '平板-02', deviceType: 'tablet', userAgent: 'seed/1.0', timezone: 'Asia/Taipei' },
+      ])
+    }
+  }
+
+  // ── Route Templates (4 board types) ───────────────────────────────────────
+  console.log('[seed] Creating route templates...')
+
+  const TEMPLATES: {
+    name: string
+    templateType: string
+    description: string
+    steps: string[]
+  }[] = [
+    {
+      name: '【模板】單面板',
+      templateType: 'single_sided',
+      description: '單面軟板標準製程，無鑽孔/PTH',
+      steps: ['裁切', '線路', 'NC', '假貼', '快壓', '化金', '文字*1', '飛針', '雷切', '成檢', '包裝'],
+    },
+    {
+      name: '【模板】雙面板',
+      templateType: 'double_sided',
+      description: '雙面軟板標準製程，含 CNC + PTH',
+      steps: ['裁切', 'CNC', 'PTH', '線路', '假貼', '快壓', 'LPI*1', '化金', '文字*1', '飛針', '雷切', '加工小片*2', '成檢', '包裝'],
+    },
+    {
+      name: '【模板】多層板',
+      templateType: 'multi_layer',
+      description: '多層軟板標準製程，含內層線路 + 二鑽 + PLASMA',
+      steps: ['裁切', '內層線路', 'NC', '假貼', '快壓', 'NC', '二鑽', 'PLASMA', 'PTH', '外層線路', '假貼', '快壓', '化金', '文字*1', '飛針', '沖制', '加工小片*2', '成檢', '包裝'],
+    },
+    {
+      name: '【模板】軟硬結合板',
+      templateType: 'rigid_flex',
+      description: '軟硬結合板標準製程，含 CNC + PTH + 壓合循環',
+      steps: ['裁切', 'CNC', 'PTH', '線路', '假貼', '快壓', 'LPI*1', 'NC', '化金', '文字*1', '飛針', '雷切', '刀模', '加工小片*1', '成檢', '包裝'],
+    },
+  ]
+
+  for (const tpl of TEMPLATES) {
+    // Upsert route (by name — idempotent)
+    const existing = await db
+      .select({ id: processRoutes.id })
+      .from(processRoutes)
+      .where(eq(processRoutes.name, tpl.name))
+      .limit(1)
+
+    let templateRouteId: string
+
+    if (existing[0]) {
+      templateRouteId = existing[0].id
+    } else {
+      const [created] = await db
+        .insert(processRoutes)
+        .values({
+          departmentId: deptMain.id,
+          name: tpl.name,
+          description: tpl.description,
+          version: 1,
+          isTemplate: true,
+          templateType: tpl.templateType,
+        })
+        .returning()
+      templateRouteId = created!.id
+    }
+
+    // Skip if steps already seeded
+    const existingSteps = await db
+      .select({ id: processSteps.id })
+      .from(processSteps)
+      .where(eq(processSteps.routeId, templateRouteId))
+      .limit(1)
+
+    if (existingSteps.length > 0) continue
+
+    const stepValues: { routeId: string; stationId: string; stepOrder: number; standardTime: null }[] = []
+    for (let i = 0; i < tpl.steps.length; i++) {
+      const stationName = tpl.steps[i]!
+      const station = findStation(deptMain.id, stationName)
+      if (!station) {
+        console.warn(`[seed]   ⚠ Template station not found: ${stationName} (template: ${tpl.name})`)
+        continue
+      }
+      stepValues.push({ routeId: templateRouteId, stationId: station.id, stepOrder: i + 1, standardTime: null })
+    }
+
+    if (stepValues.length > 0) {
+      await db.insert(processSteps).values(stepValues)
+      console.log(`[seed]   → ${tpl.name}: ${stepValues.length} steps`)
+    }
   }
 
   // ── Products (from part_master_seed) ───────────────────────────────────────
@@ -313,16 +404,17 @@ async function seed() {
   )
 
   for (const r of realParts) {
-    const deptCode = prefixToDeptCode(r['prefix_code'] ?? 'S')
-    const dept = deptMap[deptCode]!
+    const catCode = prefixToCategoryCode(r['prefix_code'] ?? 'S')
+    const cat = categoryMap.get(catCode)
 
     await db
       .insert(products)
       .values({
-        departmentId: dept.id,
+        departmentId: deptMain.id,
         name: r['part_number']!,
         modelNumber: r['part_number']!,
         description: `客戶代碼：${r['customer_code_guess'] ?? '未知'}`,
+        categoryId: cat?.id ?? null,
       })
       .onConflictDoNothing()
   }
@@ -349,16 +441,12 @@ async function seed() {
   const routeIdMap = new Map<string, string>() // route_template_id → UUID
 
   for (const [templateId, steps] of routeGroups) {
-    const firstStep = steps[0]!
-    const deptCode = prefixToDeptCode(firstStep['prefix_code'] ?? 'S')
-    const dept = deptMap[deptCode]!
-
     const [route] = await db
       .insert(processRoutes)
       .values({
-        departmentId: dept.id,
+        departmentId: deptMain.id,
         name: templateId,
-        description: `料號 ${templateId} 工序路由（${steps.length} 步驟）`,
+        description: `料號 ${templateId} 製程（${steps.length} 步驟）`,
         version: 1,
       })
       .onConflictDoNothing()
@@ -388,10 +476,6 @@ async function seed() {
     const routeId = routeIdMap.get(templateId)
     if (!routeId || seededRouteIds.has(routeId)) continue
 
-    const firstStep = steps[0]!
-    const deptCode = prefixToDeptCode(firstStep['prefix_code'] ?? 'S')
-    const dept = deptMap[deptCode]!
-
     const stepValues: {
       routeId: string
       stationId: string
@@ -401,7 +485,7 @@ async function seed() {
 
     for (const s of steps) {
       const processName = s['raw_process_name']!
-      const station = findStation(dept.id, processName)
+      const station = findStation(deptMain.id, processName)
       if (!station) {
         console.warn(`[seed]   ⚠ Station not found: ${processName} (route: ${templateId})`)
         continue
@@ -422,12 +506,26 @@ async function seed() {
   }
   console.log(`[seed]   → ${stepCount} process steps`)
 
+  // ── Link products.routeId to their routes ──────────────────────────────────
+  console.log('[seed] Linking products to routes...')
+  let linkedCount = 0
+  for (const [templateId, routeId] of routeIdMap) {
+    // Skip composite template IDs (e.g. "SA177A008A、B") — no matching product
+    if (templateId.includes('、') || templateId.includes('&')) continue
+    await db
+      .update(products)
+      .set({ routeId })
+      .where(and(eq(products.modelNumber, templateId), isNull(products.routeId)))
+    linkedCount++
+  }
+  console.log(`[seed]   → ${linkedCount} products linked to routes`)
+
   // ── Work Orders (from work_order_seed) ─────────────────────────────────────
   console.log('[seed] Creating work orders...')
   const woRows = readSeed('work_order_seed.csv')
 
-  // Assign order numbers sequentially per department
-  const woCounters: Record<string, number> = { A: 0, B: 0 }
+  // Assign order numbers sequentially
+  let woCounter = 0
   const year = new Date().getFullYear()
   let woCreated = 0
 
@@ -439,34 +537,23 @@ async function seed() {
       continue
     }
 
-    const deptCode = product.departmentId === deptA.id ? 'A' : 'B'
-    woCounters[deptCode] = (woCounters[deptCode] ?? 0) + 1
-    const seqNum = String(woCounters[deptCode]).padStart(3, '0')
-    const orderNumber = `WO-${deptCode}-${year}-${seqNum}`
+    woCounter++
+    const seqNum = String(woCounter).padStart(3, '0')
+    const orderNumber = `WO-MAIN-${year}-${seqNum}`
 
-    // Find a matching route for this product
-    const routeId = routeIdMap.get(partNumber)
-    // If no exact match, find a composite route (e.g., SA177A008A、B)
-    let finalRouteId = routeId
+    // Find a matching route for this product (exact match, then composite)
+    let finalRouteId = routeIdMap.get(partNumber)
     if (!finalRouteId) {
       for (const [tid, rid] of routeIdMap) {
-        // Check if part number is contained in the template id
         if (tid.includes(partNumber) || partNumber.includes(tid)) {
           finalRouteId = rid
           break
         }
       }
     }
-    // If still no route, use the first route for this department as fallback
-    if (!finalRouteId) {
-      const deptRoutes = allRoutes.filter((r) => r.departmentId === product.departmentId)
-      if (deptRoutes.length > 0) {
-        finalRouteId = deptRoutes[0]!.id
-      }
-    }
 
     if (!finalRouteId) {
-      console.warn(`[seed]   ⚠ No route for WO: ${partNumber}`)
+      console.warn(`[seed]   ⚠ No route for WO: ${partNumber}, skipping`)
       continue
     }
 
@@ -483,19 +570,19 @@ async function seed() {
     const qty = parseInt(r['order_qty'] ?? '0', 10)
     if (qty <= 0) continue
 
-    await db
-      .insert(workOrders)
-      .values({
-        departmentId: product.departmentId,
-        orderNumber,
-        productId: product.id,
-        routeId: finalRouteId,
-        plannedQty: qty,
-        status,
-        priority: 'normal',
-        dueDate: r['promised_due_date'] || null,
-      })
-      .onConflictDoNothing()
+    // await db
+    //   .insert(workOrders)
+    //   .values({
+    //     departmentId: product.departmentId,
+    //     orderNumber,
+    //     productId: product.id,
+    //     routeId: finalRouteId,
+    //     plannedQty: qty,
+    //     status,
+    //     priority: 'normal',
+    //     dueDate: r['promised_due_date'] || null,
+    //   })
+    //   .onConflictDoNothing()
 
     woCreated++
   }

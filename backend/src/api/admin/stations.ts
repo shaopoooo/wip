@@ -1,11 +1,12 @@
 import { Router } from 'express'
-import { eq } from 'drizzle-orm'
+import { SQL, and, eq, or } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../../models/db'
 import { stations, departments, groups } from '../../models/schema'
 import { adminAuth } from '../../middleware/adminAuth'
 import { sendSuccess } from '../../utils/response'
 import { AppError, ErrorCode } from '../../utils/errors'
+import { parsePage, buildOrder, searchCond, pagedResult, countCol } from '../../utils/queryHelpers'
 
 const router = Router()
 router.use(adminAuth)
@@ -20,6 +21,71 @@ const StationSchema = z.object({
 })
 
 const UpdateStationSchema = StationSchema.partial().omit({ departmentId: true })
+
+// GET /api/admin/stations?department_id=
+router.get('/', async (req, res, next) => {
+  try {
+    const departmentId = req.query['department_id'] as string | undefined
+    if (!departmentId) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, 'department_id is required'))
+    }
+
+    const { page, limit, offset, sortDir, sortBy, search } = parsePage(req.query as Record<string, unknown>)
+
+    const groupIdParam = req.query['group_id'] as string | undefined
+    const isActiveParam = req.query['is_active'] as string | undefined
+
+    const conditions: SQL[] = [eq(stations.departmentId, departmentId)]
+
+    if (isActiveParam !== 'all') {
+      conditions.push(eq(stations.isActive, isActiveParam !== 'false'))
+    }
+
+    if (groupIdParam) {
+      conditions.push(eq(stations.groupId, groupIdParam))
+    }
+
+    if (search) {
+      conditions.push(or(searchCond(stations.name, search), searchCond(stations.code, search)) as SQL)
+    }
+
+    const where = and(...conditions)
+
+    const sortCol =
+      sortBy === 'sort_order' ? stations.sortOrder :
+      sortBy === 'created_at' ? stations.createdAt :
+      stations.name
+
+    const order = buildOrder(sortCol, sortDir === 'desc' ? 'desc' : 'asc')
+
+    const countResult = await db.select({ total: countCol }).from(stations).where(where)
+
+    const items = await db
+      .select({
+        id: stations.id,
+        departmentId: stations.departmentId,
+        groupId: stations.groupId,
+        groupName: groups.name,
+        name: stations.name,
+        code: stations.code,
+        description: stations.description,
+        sortOrder: stations.sortOrder,
+        isActive: stations.isActive,
+        createdAt: stations.createdAt,
+        updatedAt: stations.updatedAt,
+      })
+      .from(stations)
+      .leftJoin(groups, eq(stations.groupId, groups.id))
+      .where(where)
+      .orderBy(order)
+      .limit(limit)
+      .offset(offset)
+
+    sendSuccess(res, pagedResult(items, countResult[0]?.total ?? 0, page, limit))
+  } catch (err) {
+    next(err)
+  }
+})
 
 // POST /api/admin/stations
 router.post('/', async (req, res, next) => {

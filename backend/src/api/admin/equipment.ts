@@ -1,11 +1,12 @@
 import { Router } from 'express'
-import { eq } from 'drizzle-orm'
+import { SQL, and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../../models/db'
 import { equipment, stations } from '../../models/schema'
 import { adminAuth } from '../../middleware/adminAuth'
 import { sendSuccess } from '../../utils/response'
 import { AppError, ErrorCode } from '../../utils/errors'
+import { parsePage, buildOrder, searchCond, pagedResult, countCol } from '../../utils/queryHelpers'
 
 const router = Router()
 router.use(adminAuth)
@@ -15,6 +16,7 @@ const EquipmentSchema = z.object({
   name: z.string().min(1).max(100),
   model: z.string().max(100).optional().nullable(),
   serialNumber: z.string().max(100).optional().nullable(),
+  notes: z.string().max(500).optional().nullable(),
 })
 
 const UpdateEquipmentSchema = EquipmentSchema.partial().omit({ stationId: true })
@@ -27,13 +29,39 @@ router.get('/', async (req, res, next) => {
       return next(new AppError(ErrorCode.VALIDATION_ERROR, 'station_id is required'))
     }
 
-    const rows = await db
+    const { page, limit, offset, sortDir, sortBy, search } = parsePage(req.query as Record<string, unknown>)
+
+    const isActiveParam = req.query['is_active'] as string | undefined
+
+    const conditions: SQL[] = [eq(equipment.stationId, stationId)]
+
+    if (isActiveParam !== 'all') {
+      conditions.push(eq(equipment.isActive, isActiveParam !== 'false'))
+    }
+
+    if (search) {
+      conditions.push(searchCond(equipment.name, search))
+    }
+
+    const where = and(...conditions)
+
+    const sortCol =
+      sortBy === 'created_at' ? equipment.createdAt :
+      equipment.name
+
+    const order = buildOrder(sortCol, sortDir === 'desc' ? 'desc' : 'asc')
+
+    const countResult = await db.select({ total: countCol }).from(equipment).where(where)
+
+    const items = await db
       .select()
       .from(equipment)
-      .where(eq(equipment.stationId, stationId))
-      .orderBy(equipment.name)
+      .where(where)
+      .orderBy(order)
+      .limit(limit)
+      .offset(offset)
 
-    sendSuccess(res, rows)
+    sendSuccess(res, pagedResult(items, countResult[0]?.total ?? 0, page, limit))
   } catch (err) {
     next(err)
   }
@@ -57,6 +85,7 @@ router.post('/', async (req, res, next) => {
         name: parsed.data.name,
         model: parsed.data.model ?? null,
         serialNumber: parsed.data.serialNumber ?? null,
+        notes: parsed.data.notes ?? null,
       })
       .returning()
 
@@ -80,6 +109,7 @@ router.patch('/:id', async (req, res, next) => {
     if (parsed.data.name !== undefined) updates['name'] = parsed.data.name
     if (parsed.data.model !== undefined) updates['model'] = parsed.data.model
     if (parsed.data.serialNumber !== undefined) updates['serialNumber'] = parsed.data.serialNumber
+    if (parsed.data.notes !== undefined) updates['notes'] = parsed.data.notes
 
     const [updated] = await db.update(equipment).set(updates).where(eq(equipment.id, id)).returning()
     if (!updated) return next(new AppError(ErrorCode.NOT_FOUND, '設備不存在', 404))

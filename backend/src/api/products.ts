@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { and, asc, eq } from 'drizzle-orm'
 import { db } from '../models/db'
-import { products, departments } from '../models/schema'
+import { products, productCategories } from '../models/schema'
 import { sendSuccess } from '../utils/response'
 import { AppError, ErrorCode } from '../utils/errors'
 
@@ -16,8 +16,21 @@ router.get('/', async (req, res, next) => {
     }
 
     const rows = await db
-      .select()
+      .select({
+        id: products.id,
+        departmentId: products.departmentId,
+        name: products.name,
+        modelNumber: products.modelNumber,
+        description: products.description,
+        isActive: products.isActive,
+        categoryId: products.categoryId,
+        categoryName: productCategories.name,
+        routeId: products.routeId,
+        createdAt: products.createdAt,
+        updatedAt: products.updatedAt,
+      })
       .from(products)
+      .leftJoin(productCategories, eq(products.categoryId, productCategories.id))
       .where(and(eq(products.departmentId, departmentId), eq(products.isActive, true)))
       .orderBy(asc(products.name))
 

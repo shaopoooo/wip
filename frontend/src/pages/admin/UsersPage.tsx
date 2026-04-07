@@ -1,32 +1,36 @@
 import { useState, useEffect, useCallback } from 'react'
 import { usersApi, rolesApi, AdminUserRow, Role } from '../../api/admin'
+import { useServerTable } from '../../hooks/useServerTable'
+import { TableControls } from '../../components/TableControls'
 
 export function UsersPage() {
-  const [items, setItems] = useState<AdminUserRow[]>([])
+  const st = useServerTable<AdminUserRow>({ defaultLimit: 25 })
   const [roles, setRoles] = useState<Role[]>([])
-  const [loading, setLoading] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<AdminUserRow | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [users, roleList] = await Promise.all([usersApi.list(), rolesApi.list()])
-      setItems(users)
-      setRoles(roleList)
-    } finally { setLoading(false) }
+  useEffect(() => {
+    rolesApi.listAll().then(setRoles).catch(() => {})
   }, [])
 
-  useEffect(() => { load() }, [load])
+  const load = useCallback(async () => {
+    st.setLoading(true)
+    try {
+      const result = await usersApi.list(st.params)
+      st.setData(result.items, result.total)
+    } catch { } finally { st.setLoading(false) }
+  }, [st.params]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { void load() }, [load])
 
   const handleToggleActive = async (user: AdminUserRow) => {
     await usersApi.update(user.id, { isActive: !user.isActive })
-    load()
+    void load()
   }
 
   const handleDelete = async (id: string, username: string) => {
     if (!confirm(`確定刪除帳號「${username}」？`)) return
-    try { await usersApi.delete(id); load() }
+    try { await usersApi.delete(id); void load() }
     catch (err) { alert((err as Error).message) }
   }
 
@@ -36,6 +40,13 @@ export function UsersPage() {
         <h1 className="text-xl font-bold text-slate-800">管理員帳號</h1>
         <button onClick={() => { setEditing(null); setShowModal(true) }} className={BTN_PRIMARY}>+ 新增帳號</button>
       </div>
+
+      <TableControls
+        search={st.search} onSearch={st.setSearch}
+        total={st.total} page={st.page} totalPages={st.totalPages}
+        setPage={st.setPage} pageSize={st.limit} onPageSize={st.setLimit}
+        placeholder="搜尋帳號或角色..."
+      />
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
@@ -48,9 +59,9 @@ export function UsersPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={4} className="text-center py-10 text-slate-400">載入中...</td></tr>}
-            {!loading && items.length === 0 && <tr><td colSpan={4} className="text-center py-10 text-slate-400">尚無帳號</td></tr>}
-            {items.map(item => (
+            {st.loading && <tr><td colSpan={4} className="text-center py-10 text-slate-400">載入中...</td></tr>}
+            {!st.loading && st.items.length === 0 && <tr><td colSpan={4} className="text-center py-10 text-slate-400">尚無帳號</td></tr>}
+            {st.items.map(item => (
               <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
                 <td className="px-4 py-3 font-medium text-slate-800">{item.username}</td>
                 <td className="px-4 py-3 text-slate-600">{item.roleName ?? '—'}</td>
@@ -77,7 +88,7 @@ export function UsersPage() {
           roles={roles}
           user={editing}
           onClose={() => setShowModal(false)}
-          onSaved={() => { setShowModal(false); load() }}
+          onSaved={() => { setShowModal(false); void load() }}
         />
       )}
     </div>

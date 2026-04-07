@@ -48,6 +48,7 @@ export interface ScanResult {
 }
 
 export interface RegisterDeviceInput {
+  registrationToken: string
   departmentId: string
   deviceType: 'tablet' | 'phone' | 'scanner'
   name?: string
@@ -82,6 +83,103 @@ export interface StationLog {
   actualQtyOut: number | null
 }
 
+// ── Dashboard 型別 ──────────────────────────────────────────────────────────────
+
+export interface WipStation {
+  stationId: string
+  stationName: string
+  stationCode: string | null
+  stationSortOrder: number
+  groupId: string | null
+  groupName: string | null
+  groupStage: string | null
+  groupSortOrder: number
+  departmentId: string
+  departmentName: string
+  departmentCode: string
+  wipCount: number
+}
+
+export interface TodayStats {
+  departments: {
+    departmentId: string
+    departmentName: string
+    departmentCode: string
+    completedOrders: number
+    totalCheckOuts: number
+    activeOrders: number
+  }[]
+  totals: { completedOrders: number; totalCheckOuts: number; activeOrders: number }
+}
+
+export interface WorkOrderProgress {
+  id: string
+  orderNumber: string
+  status: string
+  plannedQty: number
+  priority: string
+  dueDate: string | null
+  createdAt: string
+  isSplit: boolean
+  productName: string
+  modelNumber: string
+  departmentId: string
+  departmentName: string
+  completedSteps: number
+  totalSteps: number
+  currentStationName: string | null
+  currentGroupName: string | null
+  lastActivityAt: string | null
+}
+
+// ── Traceability 型別 ──────────────────────────────────────────────────────────
+
+export interface TraceLog {
+  id: string
+  stationName: string
+  stationCode: string | null
+  groupName: string | null
+  status: string
+  checkInTime: string
+  checkOutTime: string | null
+  actualQtyIn: number | null
+  actualQtyOut: number | null
+  defectQty: number | null
+  stepOrder: number
+}
+
+export interface TraceWorkOrder {
+  id: string
+  orderNumber: string
+  status: string
+  plannedQty: number
+  priority: string
+  dueDate: string | null
+  parentWorkOrderId: string | null
+  isSplit: boolean
+  createdAt: string
+  productName: string
+  modelNumber: string
+  departmentId: string
+  departmentName: string
+  departmentCode: string
+}
+
+export interface FamilyMember {
+  id: string
+  orderNumber: string
+  status: string
+  plannedQty: number
+  priority: string
+  dueDate: string | null
+  parentWorkOrderId: string | null
+  isSplit: boolean
+  createdAt: string
+  depth: number
+  productName: string
+  modelNumber: string
+}
+
 export const scanApi = {
   preview: (orderNumber: string, deviceId: string) =>
     api.get<ScanPreview>('/scan/preview', { params: { orderNumber }, deviceId }),
@@ -93,4 +191,50 @@ export const scanApi = {
     api.get<{ orderNumber: string; logs: StationLog[] }>('/scan/logs', { params: { orderNumber }, deviceId }),
   correct: (logId: string, input: { checkInTime?: string; checkOutTime?: string; reason: string }, deviceId: string) =>
     api.patch<{ id: string }>(`/scan/${logId}/correction`, input, { deviceId }),
+}
+
+// ── Dashboard API ──────────────────────────────────────────────────────────────
+
+export interface StationWorkOrder {
+  id: string
+  orderNumber: string
+  status: string
+  plannedQty: number
+  priority: string
+  productName: string
+  modelNumber: string
+  checkInTime?: string
+  createdAt?: string
+}
+
+export const dashboardApi = {
+  wip: (params?: { departmentId?: string; mode?: 'in_station' | 'queuing' }) => {
+    const q = new URLSearchParams()
+    if (params?.departmentId) q.set('department_id', params.departmentId)
+    if (params?.mode) q.set('mode', params.mode)
+    const qs = q.size ? `?${q}` : ''
+    return api.get<WipStation[]>(`/dashboard/wip${qs}`)
+  },
+  today: (departmentId?: string) => {
+    const qs = departmentId ? `?department_id=${departmentId}` : ''
+    return api.get<TodayStats>(`/dashboard/today${qs}`)
+  },
+  workOrderProgress: (params?: { departmentId?: string; status?: string }) => {
+    const q = new URLSearchParams()
+    if (params?.departmentId) q.set('department_id', params.departmentId)
+    if (params?.status) q.set('status', params.status)
+    const qs = q.size ? `?${q}` : ''
+    return api.get<WorkOrderProgress[]>(`/dashboard/work-order-progress${qs}`)
+  },
+  stationWorkOrders: (stationId: string, mode: 'in_station' | 'queuing' = 'in_station') =>
+    api.get<StationWorkOrder[]>(`/dashboard/station/${stationId}/work-orders?mode=${mode}`),
+}
+
+// ── Traceability API ───────────────────────────────────────────────────────────
+
+export const traceApi = {
+  get: (idOrOrderNumber: string) =>
+    api.get<{ workOrder: TraceWorkOrder; logs: TraceLog[] }>(`/traceability/${encodeURIComponent(idOrOrderNumber)}`),
+  family: (idOrOrderNumber: string) =>
+    api.get<FamilyMember[]>(`/traceability/${encodeURIComponent(idOrOrderNumber)}/family`),
 }

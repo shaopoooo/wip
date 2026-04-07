@@ -15,7 +15,8 @@ const CreateWorkOrderSchema = z.object({
   departmentId: z.string().uuid(),
   productId: z.string().uuid(),
   routeId: z.string().uuid(),
-  plannedQty: z.number().int().min(1),
+  plannedQty: z.number().int().min(1),         // 製作數量
+  orderQty: z.number().int().min(1).optional(), // 訂單需求數量（選填，預設等於 plannedQty）
   priority: z.enum(['normal', 'urgent']).default('normal'),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
 })
@@ -155,6 +156,7 @@ router.post('/', async (req, res, next) => {
         productId: parsed.data.productId,
         routeId: parsed.data.routeId,
         plannedQty: parsed.data.plannedQty,
+        orderQty: parsed.data.orderQty ?? parsed.data.plannedQty,
         status: 'pending',
         priority: parsed.data.priority,
         dueDate: parsed.data.dueDate ?? null,

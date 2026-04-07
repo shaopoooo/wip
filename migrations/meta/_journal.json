@@ -22,6 +22,34 @@
       "when": 1775482770252,
       "tag": "0002_previous_nick_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1775502863345,
+      "tag": "0003_crazy_vargas",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1775600000000,
+      "tag": "0004_device_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1775610000000,
+      "tag": "0005_equipment_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1775700000000,
+      "tag": "0006_route_templates",
+      "breakpoints": true
     }
   ]
 }

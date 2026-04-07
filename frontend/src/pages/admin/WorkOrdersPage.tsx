@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { workOrdersApi, productsApi, routesApi, departmentsApi, WorkOrderRow, Product, ProcessRoute, Department } from '../../api/admin'
+import { useServerTable } from '../../hooks/useServerTable'
+import { TableControls } from '../../components/TableControls'
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '待開工',
@@ -20,11 +22,10 @@ const STATUS_COLOR: Record<string, string> = {
 
 export function WorkOrdersPage() {
   const navigate = useNavigate()
+  const st = useServerTable<WorkOrderRow>({ defaultLimit: 25 })
   const [depts, setDepts] = useState<Department[]>([])
   const [selectedDept, setSelectedDept] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
-  const [rows, setRows] = useState<WorkOrderRow[]>([])
-  const [loading, setLoading] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
 
   useEffect(() => {
@@ -36,16 +37,21 @@ export function WorkOrdersPage() {
 
   const load = useCallback(async () => {
     if (!selectedDept) return
-    setLoading(true)
+    st.setLoading(true)
     try {
-      const data = await workOrdersApi.list({ departmentId: selectedDept, status: statusFilter || undefined, limit: 50 })
-      setRows(data.items)
-    } finally {
-      setLoading(false)
-    }
-  }, [selectedDept, statusFilter])
+      const result = await workOrdersApi.list({
+        ...st.params,
+        departmentId: selectedDept,
+        status: statusFilter || undefined,
+      })
+      st.setData(result.items, result.total)
+    } catch { } finally { st.setLoading(false) }
+  }, [st.params, selectedDept, statusFilter]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
+
+  const handleDeptChange = (val: string) => { setSelectedDept(val); st.setPage(1) }
+  const handleStatusChange = (val: string) => { setStatusFilter(val); st.setPage(1) }
 
   return (
     <div className="p-6">
@@ -61,22 +67,21 @@ export function WorkOrdersPage() {
 
       {/* Filters */}
       <div className="flex gap-3 mb-4">
-        <select
-          value={selectedDept}
-          onChange={e => setSelectedDept(e.target.value)}
-          className="border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-blue-500"
-        >
+        <select value={selectedDept} onChange={e => handleDeptChange(e.target.value)} className={SELECT_CLS} style={{ maxWidth: 180 }}>
           {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
-        <select
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
-          className="border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-blue-500"
-        >
+        <select value={statusFilter} onChange={e => handleStatusChange(e.target.value)} className={SELECT_CLS} style={{ maxWidth: 140 }}>
           <option value="">全部狀態</option>
           {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
       </div>
+
+      <TableControls
+        search={st.search} onSearch={st.setSearch}
+        total={st.total} page={st.page} totalPages={st.totalPages}
+        setPage={st.setPage} pageSize={st.limit} onPageSize={st.setLimit}
+        placeholder="搜尋工單號或產品..."
+      />
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -85,7 +90,8 @@ export function WorkOrdersPage() {
             <tr>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">工單號</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">產品</th>
-              <th className="text-left px-4 py-3 font-semibold text-slate-600">數量</th>
+              <th className="text-left px-4 py-3 font-semibold text-slate-600">製作數量</th>
+              <th className="text-left px-4 py-3 font-semibold text-slate-600">訂單數量</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">狀態</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">優先</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">交期</th>
@@ -93,17 +99,18 @@ export function WorkOrdersPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && (
-              <tr><td colSpan={7} className="text-center py-10 text-slate-400">載入中...</td></tr>
+            {st.loading && (
+              <tr><td colSpan={8} className="text-center py-10 text-slate-400">載入中...</td></tr>
             )}
-            {!loading && rows.length === 0 && (
-              <tr><td colSpan={7} className="text-center py-10 text-slate-400">目前無工單</td></tr>
+            {!st.loading && st.items.length === 0 && (
+              <tr><td colSpan={8} className="text-center py-10 text-slate-400">目前無工單</td></tr>
             )}
-            {rows.map(({ workOrder: wo, product }) => (
+            {st.items.map(({ workOrder: wo, product }) => (
               <tr key={wo.id} className="border-b border-slate-100 hover:bg-slate-50">
                 <td className="px-4 py-3 font-mono font-semibold text-slate-800">{wo.orderNumber}</td>
                 <td className="px-4 py-3 text-slate-700">{product.name}<span className="text-slate-400 ml-1 text-xs">{product.modelNumber}</span></td>
                 <td className="px-4 py-3 text-slate-700">{wo.plannedQty}</td>
+                <td className="px-4 py-3 text-slate-500">{wo.orderQty ?? '—'}</td>
                 <td className="px-4 py-3">
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLOR[wo.status] ?? 'bg-slate-100 text-slate-600'}`}>
                     {STATUS_LABEL[wo.status] ?? wo.status}
@@ -131,7 +138,7 @@ export function WorkOrdersPage() {
         <CreateWorkOrderModal
           depts={depts}
           onClose={() => setShowCreate(false)}
-          onCreated={() => { setShowCreate(false); load() }}
+          onCreated={() => { setShowCreate(false); void load() }}
         />
       )}
     </div>
@@ -141,18 +148,15 @@ export function WorkOrdersPage() {
 // ── CreateWorkOrderModal ───────────────────────────────────────────────────────
 
 function CreateWorkOrderModal({
-  depts,
-  onClose,
-  onCreated,
+  depts, onClose, onCreated,
 }: {
-  depts: Department[]
-  onClose: () => void
-  onCreated: () => void
+  depts: Department[]; onClose: () => void; onCreated: () => void
 }) {
   const [deptId, setDeptId] = useState(depts[0]?.id ?? '')
   const [productId, setProductId] = useState('')
   const [routeId, setRouteId] = useState('')
   const [plannedQty, setPlannedQty] = useState(1)
+  const [orderQty, setOrderQty] = useState<number | ''>('')
   const [priority, setPriority] = useState<'normal' | 'urgent'>('normal')
   const [dueDate, setDueDate] = useState('')
   const [products, setProducts] = useState<Product[]>([])
@@ -162,25 +166,32 @@ function CreateWorkOrderModal({
 
   useEffect(() => {
     if (!deptId) return
-    productsApi.listByDept(deptId).then(d => { setProducts(d); setProductId(d[0]?.id ?? '') }).catch(() => {})
-    routesApi.listByDept(deptId).then(d => { setRoutes(d); setRouteId(d[0]?.id ?? '') }).catch(() => {})
+    productsApi.listAll(deptId).then(d => {
+      setProducts(d)
+      const first = d[0]
+      setProductId(first?.id ?? '')
+      setRouteId(first?.routeId ?? '')
+    }).catch(() => {})
+    routesApi.listAll(deptId).then(d => setRoutes(d)).catch(() => {})
   }, [deptId])
+
+  const handleProductChange = (id: string) => {
+    setProductId(id)
+    const p = products.find(x => x.id === id)
+    if (p?.routeId) setRouteId(p.routeId)
+  }
 
   const handleSubmit = async () => {
     if (!deptId || !productId || !routeId || plannedQty < 1) {
       setError('請填寫所有必填欄位')
       return
     }
-    setSaving(true)
-    setError(null)
+    setSaving(true); setError(null)
     try {
       await workOrdersApi.create({
-        departmentId: deptId,
-        productId,
-        routeId,
-        plannedQty,
-        priority,
-        dueDate: dueDate || null,
+        departmentId: deptId, productId, routeId, plannedQty,
+        orderQty: orderQty !== '' ? orderQty : undefined,
+        priority, dueDate: dueDate || null,
       })
       onCreated()
     } catch (err) {
@@ -202,20 +213,25 @@ function CreateWorkOrderModal({
             </select>
           </Field>
           <Field label="產品型號">
-            <select value={productId} onChange={e => setProductId(e.target.value)} className={SELECT_CLS}>
+            <select value={productId} onChange={e => handleProductChange(e.target.value)} className={SELECT_CLS}>
               {products.length === 0 && <option value="">（無產品）</option>}
               {products.map(p => <option key={p.id} value={p.id}>{p.name} — {p.modelNumber}</option>)}
             </select>
           </Field>
-          <Field label="工序路由">
+          <Field label="製程路由">
             <select value={routeId} onChange={e => setRouteId(e.target.value)} className={SELECT_CLS}>
               {routes.length === 0 && <option value="">（無路由）</option>}
-              {routes.map(r => <option key={r.id} value={r.id}>{r.name} v{r.version}</option>)}
+              {routes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </Field>
-          <Field label="計畫數量">
-            <input type="number" min={1} value={plannedQty} onChange={e => setPlannedQty(Number(e.target.value))} className={INPUT_CLS} />
-          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="製作數量">
+              <input type="number" min={1} value={plannedQty} onChange={e => setPlannedQty(Number(e.target.value))} className={INPUT_CLS} />
+            </Field>
+            <Field label="訂單需求數量（選填）">
+              <input type="number" min={1} value={orderQty} onChange={e => setOrderQty(e.target.value === '' ? '' : Number(e.target.value))} className={INPUT_CLS} placeholder="同製作數量" />
+            </Field>
+          </div>
           <Field label="優先級">
             <select value={priority} onChange={e => setPriority(e.target.value as 'normal' | 'urgent')} className={SELECT_CLS}>
               <option value="normal">普通</option>

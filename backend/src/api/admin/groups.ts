@@ -1,11 +1,12 @@
 import { Router } from 'express'
-import { eq } from 'drizzle-orm'
+import { SQL, and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../../models/db'
 import { groups, departments } from '../../models/schema'
 import { adminAuth } from '../../middleware/adminAuth'
 import { sendSuccess } from '../../utils/response'
 import { AppError, ErrorCode } from '../../utils/errors'
+import { parsePage, buildOrder, searchCond, pagedResult, countCol } from '../../utils/queryHelpers'
 
 const router = Router()
 router.use(adminAuth)
@@ -20,6 +21,52 @@ const GroupSchema = z.object({
 })
 
 const UpdateGroupSchema = GroupSchema.partial().omit({ departmentId: true })
+
+// GET /api/admin/groups?department_id=
+router.get('/', async (req, res, next) => {
+  try {
+    const departmentId = req.query['department_id'] as string | undefined
+    if (!departmentId) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, 'department_id is required'))
+    }
+
+    const { page, limit, offset, sortDir, sortBy, search } = parsePage(req.query as Record<string, unknown>)
+
+    const isActiveParam = req.query['is_active'] as string | undefined
+
+    const conditions: SQL[] = [eq(groups.departmentId, departmentId)]
+
+    if (isActiveParam !== 'all') {
+      conditions.push(eq(groups.isActive, isActiveParam !== 'false'))
+    }
+
+    if (search) {
+      conditions.push(searchCond(groups.name, search))
+    }
+
+    const where = and(...conditions)
+
+    const sortCol =
+      sortBy === 'name' ? groups.name :
+      groups.sortOrder
+
+    const order = buildOrder(sortCol, sortDir === 'desc' ? 'desc' : 'asc')
+
+    const countResult = await db.select({ total: countCol }).from(groups).where(where)
+
+    const items = await db
+      .select()
+      .from(groups)
+      .where(where)
+      .orderBy(order)
+      .limit(limit)
+      .offset(offset)
+
+    sendSuccess(res, pagedResult(items, countResult[0]?.total ?? 0, page, limit))
+  } catch (err) {
+    next(err)
+  }
+})
 
 // POST /api/admin/groups
 router.post('/', async (req, res, next) => {

@@ -4,10 +4,11 @@ import { useAdminAuth } from '../contexts/AdminAuthContext'
 const NAV_ITEMS = [
   { to: '/admin/work-orders', label: '工單管理' },
   { to: '/admin/products', label: '產品型號' },
-  { to: '/admin/routes', label: '工序路由' },
+  { to: '/admin/categories', label: '產品種類' },
   { to: '/admin/stations', label: '站點管理' },
   { to: '/admin/groups', label: '組別管理' },
   { to: '/admin/equipment', label: '設備管理' },
+  { to: '/admin/departments', label: '產線管理' },
   { to: '/admin/users', label: '管理員帳號' },
   { to: '/admin/roles', label: '角色管理' },
 ]
@@ -35,10 +36,9 @@ export function AdminLayout() {
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                `block px-4 py-2.5 text-sm transition-colors ${
-                  isActive
-                    ? 'bg-blue-600 text-white font-semibold'
-                    : 'text-slate-300 hover:bg-slate-700 hover:text-white'
+                `block px-4 py-2.5 text-sm transition-colors ${isActive
+                  ? 'bg-blue-600 text-white font-semibold'
+                  : 'text-slate-300 hover:bg-slate-700 hover:text-white'
                 }`
               }
             >

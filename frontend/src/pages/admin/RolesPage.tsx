@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { rolesApi, Role } from '../../api/admin'
+import { useServerTable } from '../../hooks/useServerTable'
+import { TableControls } from '../../components/TableControls'
 
 export function RolesPage() {
-  const [items, setItems] = useState<Role[]>([])
-  const [loading, setLoading] = useState(false)
+  const st = useServerTable<Role>({ defaultLimit: 25 })
   const [showModal, setShowModal] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -11,11 +12,14 @@ export function RolesPage() {
   const [saving, setSaving] = useState(false)
 
   const load = useCallback(async () => {
-    setLoading(true)
-    try { setItems(await rolesApi.list()) } finally { setLoading(false) }
-  }, [])
+    st.setLoading(true)
+    try {
+      const result = await rolesApi.list(st.params)
+      st.setData(result.items, result.total)
+    } catch { } finally { st.setLoading(false) }
+  }, [st.params]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   const handleCreate = async () => {
     if (!name.trim()) { setError('請填寫角色名稱'); return }
@@ -23,14 +27,14 @@ export function RolesPage() {
     try {
       await rolesApi.create({ name, description: description || undefined })
       setShowModal(false); setName(''); setDescription('')
-      load()
+      void load()
     } catch (err) { setError((err as Error).message) }
     finally { setSaving(false) }
   }
 
   const handleDelete = async (id: string, roleName: string) => {
     if (!confirm(`確定刪除角色「${roleName}」？`)) return
-    try { await rolesApi.delete(id); load() }
+    try { await rolesApi.delete(id); void load() }
     catch (err) { alert((err as Error).message) }
   }
 
@@ -40,6 +44,13 @@ export function RolesPage() {
         <h1 className="text-xl font-bold text-slate-800">角色管理</h1>
         <button onClick={() => setShowModal(true)} className={BTN_PRIMARY}>+ 新增角色</button>
       </div>
+
+      <TableControls
+        search={st.search} onSearch={st.setSearch}
+        total={st.total} page={st.page} totalPages={st.totalPages}
+        setPage={st.setPage} pageSize={st.limit} onPageSize={st.setLimit}
+        placeholder="搜尋角色名稱..."
+      />
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
@@ -51,9 +62,9 @@ export function RolesPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={3} className="text-center py-10 text-slate-400">載入中...</td></tr>}
-            {!loading && items.length === 0 && <tr><td colSpan={3} className="text-center py-10 text-slate-400">尚無角色</td></tr>}
-            {items.map(item => (
+            {st.loading && <tr><td colSpan={3} className="text-center py-10 text-slate-400">載入中...</td></tr>}
+            {!st.loading && st.items.length === 0 && <tr><td colSpan={3} className="text-center py-10 text-slate-400">尚無角色</td></tr>}
+            {st.items.map(item => (
               <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
                 <td className="px-4 py-3 font-medium text-slate-800">{item.name}</td>
                 <td className="px-4 py-3 text-slate-500">{item.description ?? '—'}</td>

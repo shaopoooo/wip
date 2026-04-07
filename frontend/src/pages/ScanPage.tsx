@@ -356,7 +356,7 @@ export function ScanPage() {
             </div>
             <WorkOrderCard preview={state.preview} action="check_in" />
             <div>
-              <p className="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-2">工序進度</p>
+              <p className="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-2">製程進度</p>
               <StepsContextPanel steps={state.preview.stepsContext} currentStepOrder={state.preview.step.stepOrder} />
             </div>
             <button
@@ -379,7 +379,7 @@ export function ScanPage() {
             </div>
             <WorkOrderCard preview={state.preview} action="check_out" />
             <div>
-              <p className="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-2">工序進度</p>
+              <p className="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-2">製程進度</p>
               <StepsContextPanel steps={state.preview.stepsContext} currentStepOrder={state.preview.step.stepOrder} />
             </div>
             {/* 不良品輸入（Phase 2 啟用） */}

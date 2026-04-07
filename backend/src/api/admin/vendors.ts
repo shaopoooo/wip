@@ -1,11 +1,12 @@
 import { Router } from 'express'
-import { eq } from 'drizzle-orm'
+import { SQL, and, eq, or } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../../models/db'
 import { vendors } from '../../models/schema'
 import { adminAuth } from '../../middleware/adminAuth'
 import { sendSuccess } from '../../utils/response'
 import { AppError, ErrorCode } from '../../utils/errors'
+import { parsePage, buildOrder, searchCond, pagedResult, countCol } from '../../utils/queryHelpers'
 
 const router = Router()
 router.use(adminAuth)
@@ -23,10 +24,51 @@ const VendorSchema = z.object({
 const UpdateVendorSchema = VendorSchema.partial()
 
 // GET /api/admin/vendors
-router.get('/', async (_req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
-    const rows = await db.select().from(vendors).where(eq(vendors.isActive, true))
-    sendSuccess(res, rows)
+    const q = req.query as Record<string, unknown>
+    const { page, limit, offset, sortBy, search } = parsePage(q)
+    const sortDir = (q['sort_dir'] === 'asc' ? 'asc' : 'desc') as 'asc' | 'desc'
+
+    const isActiveParam = q['is_active'] as string | undefined
+    const needsReviewParam = q['needs_review'] as string | undefined
+
+    const conditions: SQL[] = []
+
+    if (isActiveParam !== 'all') {
+      conditions.push(eq(vendors.isActive, isActiveParam !== 'false'))
+    }
+
+    if (needsReviewParam === 'true') {
+      conditions.push(eq(vendors.needsManualReview, true))
+    } else if (needsReviewParam === 'false') {
+      conditions.push(eq(vendors.needsManualReview, false))
+    }
+
+    if (search) {
+      conditions.push(or(searchCond(vendors.token, search), searchCond(vendors.normalizedName, search)) as SQL)
+    }
+
+    const where = conditions.length > 0 ? and(...conditions) : undefined
+
+    const sortCol =
+      sortBy === 'token' ? vendors.token :
+      sortBy === 'created_at' ? vendors.createdAt :
+      vendors.normalizedName
+
+    const order = buildOrder(sortCol, sortDir)
+
+    const countResult = await db.select({ total: countCol }).from(vendors).where(where)
+
+    const items = await db
+      .select()
+      .from(vendors)
+      .where(where)
+      .orderBy(order)
+      .limit(limit)
+      .offset(offset)
+
+    sendSuccess(res, pagedResult(items, countResult[0]?.total ?? 0, page, limit))
   } catch (err) {
     next(err)
   }

@@ -14,7 +14,7 @@ export class ApiError extends Error {
 // 錯誤碼 → 中文訊息
 const ERROR_MESSAGES: Record<string, string> = {
   WRONG_DEPARTMENT: '此工單不屬於本產線，請確認掃描裝置的站點設定',
-  SKIP_STATION: '此站點不在工單的工序路由中',
+  SKIP_STATION: '此站點不在工單的製程中',
   DUPLICATE_SCAN: '30 秒內已掃描此工單，請確認是否重複操作',
   ORDER_CLOSED: '工單已結案（取消或完工），無法繼續操作',
   ORDER_ALREADY_SPLIT: '此工單已拆分，請掃描對應的子單',

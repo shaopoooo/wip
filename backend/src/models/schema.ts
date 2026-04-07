@@ -25,6 +25,18 @@ export const departments = pgTable('departments', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
+// ── product_categories ───────────────────────────────────────────────────────
+export const productCategories = pgTable('product_categories', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: varchar('name', { length: 100 }).notNull(),
+  code: varchar('code', { length: 20 }).unique(),
+  description: text('description'),
+  sortOrder: integer('sort_order').default(0),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+})
+
 // ── customers ─────────────────────────────────────────────────────────────────
 export const customers = pgTable('customers', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -94,15 +106,17 @@ export const products = pgTable(
     modelNumber: varchar('model_number', { length: 50 }).notNull(),
     description: text('description'),
     isActive: boolean('is_active').default(true),
+    categoryId: uuid('category_id').references(() => productCategories.id),  // 產品種類
+    routeId: uuid('route_id'),  // 1:1 product-to-route (FK defined via foreignKey helper to avoid circular)
     bomVersion: varchar('bom_version', { length: 20 }),     // Phase 2
     unitCost: numeric('unit_cost', { precision: 12, scale: 2 }), // Phase 3
-    category: varchar('category', { length: 50 }),           // Phase 3
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
   },
   (t) => [
     unique('uq_products_dept_model').on(t.departmentId, t.modelNumber),
     index('idx_products_dept').on(t.departmentId),
+    index('idx_products_category').on(t.categoryId),
   ],
 )
 
@@ -143,6 +157,8 @@ export const processRoutes = pgTable(
     description: text('description'),
     isActive: boolean('is_active').default(true),
     version: integer('version').default(1),
+    isTemplate: boolean('is_template').default(false).notNull(),
+    templateType: varchar('template_type', { length: 50 }), // 'single_sided' | 'double_sided' | 'multi_layer' | 'rigid_flex'
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
   },
@@ -182,6 +198,7 @@ export const equipment = pgTable(
     model: varchar('model', { length: 100 }),
     serialNumber: varchar('serial_number', { length: 100 }),
     isActive: boolean('is_active').default(true),
+    notes: text('notes'),                     // 備註
     calibrationDue: date('calibration_due'),  // Phase 2
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
@@ -234,7 +251,8 @@ export const workOrders = pgTable(
     routeId: uuid('route_id')
       .notNull()
       .references(() => processRoutes.id),
-    plannedQty: integer('planned_qty').notNull(),
+    plannedQty: integer('planned_qty').notNull(),   // 製作數量
+    orderQty: integer('order_qty'),                  // 訂單需求數量
     status: varchar('status', { length: 20 }).notNull(),
     // pending | in_progress | completed | cancelled | split
     priority: varchar('priority', { length: 10 }).default('normal'), // normal | urgent
@@ -354,6 +372,23 @@ export const auditLogs = pgTable(
   (t) => [
     index('idx_audit_entity').on(t.entityType, t.entityId),
     index('idx_audit_time').on(t.createdAt),
+  ],
+)
+
+// ── device_tokens ─────────────────────────────────────────────────────────────
+export const deviceTokens = pgTable(
+  'device_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    token: varchar('token', { length: 20 }).notNull().unique(),  // e.g. "A3BK9ZX2"
+    isUsed: boolean('is_used').default(false).notNull(),
+    deviceId: uuid('device_id').references(() => devices.id),   // NULL until consumed
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('idx_device_tokens_token').on(t.token),
+    index('idx_device_tokens_used').on(t.isUsed),
   ],
 )
 

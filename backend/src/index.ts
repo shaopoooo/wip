@@ -13,6 +13,7 @@ import productsRouter from './api/products'
 import processRoutesRouter from './api/processRoutes'
 import scanRouter from './api/scan'
 // Admin
+import adminDepartmentsRouter from './api/admin/departments'
 import adminAuthRouter from './api/admin/auth'
 import adminRolesRouter from './api/admin/roles'
 import adminUsersRouter from './api/admin/users'
@@ -24,6 +25,10 @@ import adminProcessRoutesRouter from './api/admin/processRoutes'
 import adminWorkOrdersRouter from './api/admin/workOrders'
 import adminCustomersRouter from './api/admin/customers'
 import adminVendorsRouter from './api/admin/vendors'
+import adminCategoriesRouter from './api/admin/categories'
+import adminDeviceTokensRouter from './api/admin/deviceTokens'
+import dashboardRouter from './api/dashboard'
+import traceabilityRouter from './api/traceability'
 
 const app = express()
 const port = Number(process.env['PORT'] ?? 3000)
@@ -48,9 +53,12 @@ app.use('/api/work-orders', workOrdersRouter)
 app.use('/api/products', productsRouter)
 app.use('/api/process-routes', processRoutesRouter)
 app.use('/api/scan', scanRouter)
+app.use('/api/dashboard', dashboardRouter)
+app.use('/api/traceability', traceabilityRouter)
 
 // ── Admin API routes (JWT-protected inside each router) ────────────────────────
 app.use('/api/admin/auth', adminAuthRouter)
+app.use('/api/admin/departments', adminDepartmentsRouter)
 app.use('/api/admin/roles', adminRolesRouter)
 app.use('/api/admin/users', adminUsersRouter)
 app.use('/api/admin/groups', adminGroupsRouter)
@@ -61,6 +69,8 @@ app.use('/api/admin/process-routes', adminProcessRoutesRouter)
 app.use('/api/admin/work-orders', adminWorkOrdersRouter)
 app.use('/api/admin/customers', adminCustomersRouter)
 app.use('/api/admin/vendors', adminVendorsRouter)
+app.use('/api/admin/product-categories', adminCategoriesRouter)
+app.use('/api/admin/device-tokens', adminDeviceTokensRouter)
 
 // ── Global error handler (must be last) ───────────────────────────────────────
 app.use(errorHandler)

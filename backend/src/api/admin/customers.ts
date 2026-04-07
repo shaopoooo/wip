@@ -1,11 +1,12 @@
 import { Router } from 'express'
-import { eq } from 'drizzle-orm'
+import { SQL, and, eq, or } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../../models/db'
 import { customers } from '../../models/schema'
 import { adminAuth } from '../../middleware/adminAuth'
 import { sendSuccess } from '../../utils/response'
 import { AppError, ErrorCode } from '../../utils/errors'
+import { parsePage, buildOrder, searchCond, pagedResult, countCol } from '../../utils/queryHelpers'
 
 const router = Router()
 router.use(adminAuth)
@@ -20,10 +21,42 @@ const CustomerSchema = z.object({
 const UpdateCustomerSchema = CustomerSchema.partial()
 
 // GET /api/admin/customers
-router.get('/', async (_req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
-    const rows = await db.select().from(customers).where(eq(customers.isActive, true))
-    sendSuccess(res, rows)
+    const { page, limit, offset, sortDir, sortBy, search } = parsePage(req.query as Record<string, unknown>)
+
+    const isActiveParam = req.query['is_active'] as string | undefined
+
+    const conditions: SQL[] = []
+
+    if (isActiveParam !== 'all') {
+      conditions.push(eq(customers.isActive, isActiveParam !== 'false'))
+    }
+
+    if (search) {
+      conditions.push(or(searchCond(customers.code, search), searchCond(customers.name, search)) as SQL)
+    }
+
+    const where = conditions.length > 0 ? and(...conditions) : undefined
+
+    const sortCol =
+      sortBy === 'name' ? customers.name :
+      sortBy === 'created_at' ? customers.createdAt :
+      customers.code
+
+    const order = buildOrder(sortCol, sortDir === 'desc' ? 'desc' : 'asc')
+
+    const countResult = await db.select({ total: countCol }).from(customers).where(where)
+
+    const items = await db
+      .select()
+      .from(customers)
+      .where(where)
+      .orderBy(order)
+      .limit(limit)
+      .offset(offset)
+
+    sendSuccess(res, pagedResult(items, countResult[0]?.total ?? 0, page, limit))
   } catch (err) {
     next(err)
   }

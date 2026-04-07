@@ -69,7 +69,7 @@ router.get('/preview', deviceAuth, async (req, res, next) => {
       .where(eq(processSteps.routeId, wo.routeId))
       .orderBy(processSteps.stepOrder)
 
-    if (steps.length === 0) return next(new AppError(ErrorCode.NOT_FOUND, '工序路由無步驟', 500))
+    if (steps.length === 0) return next(new AppError(ErrorCode.NOT_FOUND, '製程無步驟', 500))
 
     const targetStationId = await ScanService.determineTargetStationId(wo.id, steps, overrideStationId)
 
@@ -77,7 +77,7 @@ router.get('/preview', deviceAuth, async (req, res, next) => {
     if (!station) return next(new AppError(ErrorCode.NOT_FOUND, '目標設備站點不存在', 500))
 
     const step = steps.find(s => s.stationId === targetStationId)
-    if (!step) return next(new AppError(ErrorCode.SKIP_STATION, '推導或指定的站點不在工單的工序路由中'))
+    if (!step) return next(new AppError(ErrorCode.SKIP_STATION, '推導或指定的站點不在工單的製程'))
 
     // Open log at this station?
     const [openLog] = await db

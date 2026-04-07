@@ -107,7 +107,7 @@ export class ScanService {
         .orderBy(processSteps.stepOrder)
 
       if (steps.length === 0) {
-        throw new AppError(ErrorCode.NOT_FOUND, '工序路由無步驟', 500)
+        throw new AppError(ErrorCode.NOT_FOUND, '製程無步驟', 500)
       }
 
       // 3. Determine the target station
@@ -272,7 +272,7 @@ export class ScanService {
     // Confirm current station is in this route
     const currentStep = steps.find((s) => s.stationId === station.id)
     if (!currentStep) {
-      throw new AppError(ErrorCode.SKIP_STATION, '此站點不在工單的工序路由中')
+      throw new AppError(ErrorCode.SKIP_STATION, '此站點不在工單的製程中')
     }
 
     // 30-second dedup

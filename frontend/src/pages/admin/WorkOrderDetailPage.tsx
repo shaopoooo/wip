@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { workOrdersApi, WorkOrderDetail } from '../../api/admin'
+import { workOrdersApi, routesApi, WorkOrderDetail, ProcessStep } from '../../api/admin'
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '待開工', in_progress: '進行中', completed: '已完工', cancelled: '已取消', split: '已拆單',
@@ -27,6 +27,7 @@ export function WorkOrderDetailPage() {
   const navigate = useNavigate()
   const [detail, setDetail] = useState<WorkOrderDetail | null>(null)
   const [qr, setQr] = useState<{ qrDataUrl: string; orderNumber: string } | null>(null)
+  const [routeSteps, setRouteSteps] = useState<ProcessStep[]>([])
   const [loading, setLoading] = useState(true)
   const [statusChanging, setStatusChanging] = useState(false)
   const printRef = useRef<HTMLDivElement>(null)
@@ -39,6 +40,9 @@ export function WorkOrderDetailPage() {
     ]).then(([d, q]) => {
       setDetail(d)
       setQr(q)
+      if (d.workOrder.routeId) {
+        routesApi.steps(d.workOrder.routeId).then(setRouteSteps).catch(() => {})
+      }
     }).finally(() => setLoading(false))
   }, [id])
 
@@ -70,6 +74,9 @@ export function WorkOrderDetailPage() {
   }
 
   const { workOrder: wo, product, route, logs } = detail
+  // Build a set of completed station IDs for route step progress overlay
+  const completedStationIds = new Set(logs.filter(l => l.status === 'completed' || l.status === 'auto_filled').map(l => l.stationName))
+  const inProgressStationNames = new Set(logs.filter(l => l.status === 'in_progress').map(l => l.stationName))
 
   return (
     <div className="p-6 max-w-4xl">
@@ -98,7 +105,8 @@ export function WorkOrderDetailPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-sm">
-              <InfoRow label="計畫數量" value={String(wo.plannedQty)} />
+              <InfoRow label="製作數量" value={String(wo.plannedQty)} />
+              <InfoRow label="訂單需求數量" value={wo.orderQty != null ? String(wo.orderQty) : '—'} />
               <InfoRow label="優先級" value={wo.priority === 'urgent' ? '急件' : '普通'} />
               <InfoRow label="路由" value={route?.name ?? '—'} />
               <InfoRow label="交期" value={wo.dueDate ?? '—'} />
@@ -120,6 +128,40 @@ export function WorkOrderDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Route steps progress */}
+          {routeSteps.length > 0 && (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100">
+                <h2 className="font-semibold text-slate-800">預計製程（{routeSteps.length} 步驟）</h2>
+              </div>
+              <div className="flex flex-wrap gap-2 p-4">
+                {routeSteps.map((step, i) => {
+                  const done = completedStationIds.has(step.stationName)
+                  const active = inProgressStationNames.has(step.stationName)
+                  return (
+                    <div key={step.id} className="flex items-center gap-1">
+                      <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium ${
+                        done ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        : active ? 'bg-blue-50 border-blue-300 text-blue-700'
+                        : 'bg-slate-50 border-slate-200 text-slate-500'
+                      }`}>
+                        <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                          done ? 'bg-emerald-500 text-white'
+                          : active ? 'bg-blue-500 text-white'
+                          : 'bg-slate-300 text-slate-600'
+                        }`}>{step.stepOrder}</span>
+                        <span>{step.stationName}</span>
+                        {done && <span className="text-emerald-600">✓</span>}
+                        {active && <span className="text-blue-500 animate-pulse">●</span>}
+                      </div>
+                      {i < routeSteps.length - 1 && <span className="text-slate-300 text-xs">→</span>}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Station logs */}
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">

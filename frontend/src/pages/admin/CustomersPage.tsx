@@ -1,57 +1,43 @@
 import { useState, useEffect, useCallback } from 'react'
-import { groupsApi, departmentsApi, Group, Department } from '../../api/admin'
+import { customersApi, Customer } from '../../api/admin'
 import { useServerTable } from '../../hooks/useServerTable'
 import { TableControls } from '../../components/TableControls'
 
-export function GroupsPage() {
-  const st = useServerTable<Group>({ defaultLimit: 25 })
-  const [depts, setDepts] = useState<Department[]>([])
-  const [selectedDept, setSelectedDept] = useState('')
-  const [isActive, setIsActive] = useState('true')
+export function CustomersPage() {
+  const st = useServerTable<Customer>({ defaultLimit: 25 })
+  const [isActive, setIsActive] = useState('')
   const [showModal, setShowModal] = useState(false)
-  const [editing, setEditing] = useState<Group | null>(null)
-
-  useEffect(() => {
-    departmentsApi.list().then(d => {
-      setDepts(d)
-      if (d.length > 0) setSelectedDept(d[0]!.id)
-    }).catch(() => {})
-  }, [])
+  const [editing, setEditing] = useState<Customer | null>(null)
 
   const load = useCallback(async () => {
-    if (!selectedDept) return
     st.setLoading(true)
     try {
-      const result = await groupsApi.list(selectedDept, {
-        ...st.params,
-        isActive: isActive || undefined,
-      })
+      const result = await customersApi.list({ ...st.params, isActive: isActive || undefined })
       st.setData(result.items, result.total)
     } catch { } finally { st.setLoading(false) }
-  }, [st.params, selectedDept, isActive]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [st.params, isActive]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { void load() }, [load])
 
-  const handleDeptChange = (val: string) => { setSelectedDept(val); st.setPage(1) }
-  const handleIsActiveChange = (val: string) => { setIsActive(val); st.setPage(1) }
+  const handleIsActiveChange = (val: string) => {
+    setIsActive(val)
+    st.setPage(1)
+  }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('確定停用此組別？')) return
-    await groupsApi.delete(id)
-    void load()
+    if (!confirm('確定停用此客戶？')) return
+    try { await customersApi.delete(id); void load() }
+    catch (err) { alert((err as Error).message) }
   }
 
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-slate-800">組別管理</h1>
-        <button onClick={() => { setEditing(null); setShowModal(true) }} className={BTN_PRIMARY}>+ 新增組別</button>
+        <h1 className="text-xl font-bold text-slate-800">客戶主檔</h1>
+        <button onClick={() => { setEditing(null); setShowModal(true) }} className={BTN_PRIMARY}>+ 新增客戶</button>
       </div>
 
       <div className="flex gap-3 mb-4">
-        <select value={selectedDept} onChange={e => handleDeptChange(e.target.value)} className={SELECT_CLS}>
-          {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
         <select value={isActive} onChange={e => handleIsActiveChange(e.target.value)} className={SELECT_CLS} style={{ width: 110 }}>
           <option value="">全部</option>
           <option value="true">啟用中</option>
@@ -63,30 +49,34 @@ export function GroupsPage() {
         search={st.search} onSearch={st.setSearch}
         total={st.total} page={st.page} totalPages={st.totalPages}
         setPage={st.setPage} pageSize={st.limit} onPageSize={st.setLimit}
-        placeholder="搜尋組別名稱、代碼或製程階段..."
+        placeholder="搜尋客戶代碼或名稱..."
       />
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              <th className="text-left px-4 py-3 font-semibold text-slate-600">組別名稱</th>
-              <th className="text-left px-4 py-3 font-semibold text-slate-600">代碼</th>
-              <th className="text-left px-4 py-3 font-semibold text-slate-600">製程階段</th>
-              <th className="text-left px-4 py-3 font-semibold text-slate-600">說明</th>
+              <th className="text-left px-4 py-3 font-semibold text-slate-600">客戶代碼</th>
+              <th className="text-left px-4 py-3 font-semibold text-slate-600">名稱</th>
+              <th className="text-left px-4 py-3 font-semibold text-slate-600">費用檔數</th>
+              <th className="text-left px-4 py-3 font-semibold text-slate-600">需對照名稱</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">狀態</th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
             {st.loading && <tr><td colSpan={6} className="text-center py-10 text-slate-400">載入中...</td></tr>}
-            {!st.loading && st.items.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-400">尚無組別</td></tr>}
+            {!st.loading && st.items.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-400">尚無客戶</td></tr>}
             {st.items.map(item => (
               <tr key={item.id} className={`border-b border-slate-100 hover:bg-slate-50 ${!item.isActive ? 'opacity-50' : ''}`}>
-                <td className="px-4 py-3 font-medium text-slate-800">{item.name}</td>
-                <td className="px-4 py-3 font-mono text-slate-600">{item.code ?? '—'}</td>
-                <td className="px-4 py-3 text-slate-600">{item.stage ?? '—'}</td>
-                <td className="px-4 py-3 text-slate-500">{item.description ?? '—'}</td>
+                <td className="px-4 py-3 font-mono font-semibold text-slate-700">{item.code}</td>
+                <td className="px-4 py-3 text-slate-800">{item.name ?? '—'}</td>
+                <td className="px-4 py-3 text-slate-600">{item.costFileCount}</td>
+                <td className="px-4 py-3">
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${item.needsNameMapping ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
+                    {item.needsNameMapping ? '待對照' : '已完成'}
+                  </span>
+                </td>
                 <td className="px-4 py-3">
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${item.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                     {item.isActive ? '啟用' : '停用'}
@@ -103,10 +93,8 @@ export function GroupsPage() {
       </div>
 
       {showModal && (
-        <GroupModal
-          depts={depts}
-          defaultDeptId={selectedDept}
-          group={editing}
+        <CustomerModal
+          customer={editing}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); void load() }}
         />
@@ -115,26 +103,24 @@ export function GroupsPage() {
   )
 }
 
-function GroupModal({ depts, defaultDeptId, group, onClose, onSaved }: {
-  depts: Department[]; defaultDeptId: string; group: Group | null
-  onClose: () => void; onSaved: () => void
+function CustomerModal({ customer, onClose, onSaved }: {
+  customer: Customer | null; onClose: () => void; onSaved: () => void
 }) {
-  const [deptId, setDeptId] = useState(group?.departmentId ?? defaultDeptId)
-  const [name, setName] = useState(group?.name ?? '')
-  const [code, setCode] = useState(group?.code ?? '')
-  const [stage, setStage] = useState(group?.stage ?? '')
-  const [description, setDescription] = useState(group?.description ?? '')
+  const [code, setCode] = useState(customer?.code ?? '')
+  const [name, setName] = useState(customer?.name ?? '')
+  const [costFileCount, setCostFileCount] = useState(customer?.costFileCount ?? 0)
+  const [needsNameMapping, setNeedsNameMapping] = useState(customer?.needsNameMapping ?? true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   const handleSave = async () => {
-    if (!name.trim()) { setError('請填寫組別名稱'); return }
+    if (!code.trim()) { setError('請填寫客戶代碼'); return }
     setSaving(true); setError(null)
     try {
-      if (group) {
-        await groupsApi.update(group.id, { name, code: code || null, stage: stage || null, description: description || null })
+      if (customer) {
+        await customersApi.update(customer.id, { code, name: name || null, costFileCount, needsNameMapping })
       } else {
-        await groupsApi.create({ departmentId: deptId, name, code: code || null, stage: stage || null, description: description || null })
+        await customersApi.create({ code, name: name || null, costFileCount, needsNameMapping })
       }
       onSaved()
     } catch (err) { setError((err as Error).message) }
@@ -144,13 +130,17 @@ function GroupModal({ depts, defaultDeptId, group, onClose, onSaved }: {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
-        <h2 className="font-bold text-slate-800 text-lg">{group ? '編輯組別' : '新增組別'}</h2>
+        <h2 className="font-bold text-slate-800 text-lg">{customer ? '編輯客戶' : '新增客戶'}</h2>
         <div className="space-y-3">
-          {!group && <Field label="產線"><select value={deptId} onChange={e => setDeptId(e.target.value)} className={SELECT_CLS}>{depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></Field>}
-          <Field label="組別名稱"><input value={name} onChange={e => setName(e.target.value)} className={INPUT_CLS} placeholder="SMT 組" /></Field>
-          <Field label="代碼（選填）"><input value={code} onChange={e => setCode(e.target.value)} className={INPUT_CLS} placeholder="SMT" /></Field>
-          <Field label="製程階段（選填）"><input value={stage} onChange={e => setStage(e.target.value)} className={INPUT_CLS} placeholder="貼合/壓合" /></Field>
-          <Field label="說明（選填）"><input value={description} onChange={e => setDescription(e.target.value)} className={INPUT_CLS} /></Field>
+          <Field label="客戶代碼"><input value={code} onChange={e => setCode(e.target.value)} className={INPUT_CLS} placeholder="022" /></Field>
+          <Field label="名稱（選填）"><input value={name} onChange={e => setName(e.target.value)} className={INPUT_CLS} placeholder="客戶全名" /></Field>
+          <Field label="費用檔數"><input type="number" min={0} value={costFileCount} onChange={e => setCostFileCount(Number(e.target.value))} className={INPUT_CLS} /></Field>
+          <Field label="需對照名稱">
+            <select value={String(needsNameMapping)} onChange={e => setNeedsNameMapping(e.target.value === 'true')} className={SELECT_CLS}>
+              <option value="true">是</option>
+              <option value="false">否</option>
+            </select>
+          </Field>
         </div>
         {error && <p className="text-red-600 text-sm">{error}</p>}
         <div className="flex gap-3 pt-2">
@@ -171,6 +161,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
-const SELECT_CLS = 'border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500'
+const SELECT_CLS = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500'
 const INPUT_CLS = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500'
 const BTN_PRIMARY = 'bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer'

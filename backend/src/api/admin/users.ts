@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { eq } from 'drizzle-orm'
+import { SQL, and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
 import { db } from '../../models/db'
@@ -7,6 +7,7 @@ import { adminUsers, roles } from '../../models/schema'
 import { adminAuth } from '../../middleware/adminAuth'
 import { sendSuccess } from '../../utils/response'
 import { AppError, ErrorCode } from '../../utils/errors'
+import { parsePage, buildOrder, searchCond, pagedResult, countCol } from '../../utils/queryHelpers'
 
 const router = Router()
 router.use(adminAuth)
@@ -24,9 +25,27 @@ const UpdateUserSchema = z.object({
 })
 
 // GET /api/admin/users
-router.get('/', async (_req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
-    const rows = await db
+    const { page, limit, offset, sortDir, sortBy, search } = parsePage(req.query as Record<string, unknown>)
+
+    const conditions: SQL[] = []
+
+    if (search) {
+      conditions.push(searchCond(adminUsers.username, search))
+    }
+
+    const where = conditions.length > 0 ? and(...conditions) : undefined
+
+    const sortCol =
+      sortBy === 'created_at' ? adminUsers.createdAt :
+      adminUsers.username
+
+    const order = buildOrder(sortCol, sortDir === 'desc' ? 'desc' : 'asc')
+
+    const countResult = await db.select({ total: countCol }).from(adminUsers).where(where)
+
+    const items = await db
       .select({
         id: adminUsers.id,
         username: adminUsers.username,
@@ -37,9 +56,12 @@ router.get('/', async (_req, res, next) => {
       })
       .from(adminUsers)
       .leftJoin(roles, eq(adminUsers.roleId, roles.id))
-      .orderBy(adminUsers.createdAt)
+      .where(where)
+      .orderBy(order)
+      .limit(limit)
+      .offset(offset)
 
-    sendSuccess(res, rows)
+    sendSuccess(res, pagedResult(items, countResult[0]?.total ?? 0, page, limit))
   } catch (err) {
     next(err)
   }

@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../models/db'
-import { devices, stations, departments } from '../models/schema'
+import { devices, stations, departments, deviceTokens } from '../models/schema'
 import { sendSuccess } from '../utils/response'
 import { AppError, ErrorCode } from '../utils/errors'
 
@@ -37,6 +37,7 @@ router.get('/:id', async (req, res, next) => {
 
 // POST /api/devices/register  — BYOD first-time registration
 const RegisterSchema = z.object({
+  registrationToken: z.string().min(1).max(20),
   departmentId: z.string().uuid(),
   stationId: z.string().uuid().optional(),
   deviceType: z.enum(['tablet', 'phone', 'scanner']),
@@ -57,8 +58,22 @@ router.post('/register', async (req, res, next) => {
       )
     }
 
-    const { departmentId, stationId, deviceType, name, userAgent, screenInfo, timezone, webglRenderer, employeeId } =
+    const { registrationToken, departmentId, stationId, deviceType, name, userAgent, screenInfo, timezone, webglRenderer, employeeId } =
       parsed.data
+
+    // Verify registration token
+    const [tokenRow] = await db
+      .select()
+      .from(deviceTokens)
+      .where(eq(deviceTokens.token, registrationToken.toUpperCase()))
+      .limit(1)
+
+    if (!tokenRow) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, '序號無效', 400))
+    }
+    if (tokenRow.isUsed) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, '序號已使用', 400))
+    }
 
     // Verify department exists
     const [department] = await db
@@ -103,6 +118,12 @@ router.post('/register', async (req, res, next) => {
         lastSeenAt: new Date(),
       })
       .returning()
+
+    // Mark token as consumed
+    await db
+      .update(deviceTokens)
+      .set({ isUsed: true, deviceId: device!.id, usedAt: new Date() })
+      .where(eq(deviceTokens.id, tokenRow.id))
 
     sendSuccess(res, device, 201)
   } catch (err) {

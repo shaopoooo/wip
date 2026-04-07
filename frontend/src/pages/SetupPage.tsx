@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { departmentsApi, devicesApi, type Department } from '../api'
 import { saveDeviceId, collectFingerprint } from '../hooks/useDevice'
 
-type Step = 'dept' | 'info' | 'registering'
+type Step = 'token' | 'dept' | 'info' | 'registering'
 
 export function SetupPage() {
   const navigate = useNavigate()
-  const [step, setStep] = useState<Step>('dept')
+  const [step, setStep] = useState<Step>('token')
+  const [registrationToken, setRegistrationToken] = useState('')
   const [departments, setDepartments] = useState<Department[]>([])
   const [selectedDept, setSelectedDept] = useState<Department | null>(null)
   const [deviceName, setDeviceName] = useState('')
@@ -17,6 +18,12 @@ export function SetupPage() {
   useEffect(() => {
     departmentsApi.list().then(setDepartments).catch(() => setError('無法載入部門資料'))
   }, [])
+
+  const submitToken = () => {
+    if (!registrationToken.trim()) { setError('請輸入序號'); return }
+    setError(null)
+    setStep('dept')
+  }
 
   const selectDept = (dept: Department) => {
     setSelectedDept(dept)
@@ -31,6 +38,7 @@ export function SetupPage() {
     const fp = collectFingerprint()
     try {
       const result = await devicesApi.register({
+        registrationToken: registrationToken.trim().toUpperCase(),
         departmentId: selectedDept.id,
         deviceType: 'tablet',
         name: deviceName.trim() || undefined,
@@ -46,6 +54,8 @@ export function SetupPage() {
     }
   }
 
+  const tokenValid = registrationToken.trim().length > 0
+
   return (
     <div className="h-full flex items-center justify-center bg-gradient-to-br from-blue-600 to-blue-900 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-8">
@@ -54,6 +64,30 @@ export function SetupPage() {
 
         {error && (
           <div className="bg-red-50 text-red-700 rounded-lg px-4 py-3 mb-4 text-sm">{error}</div>
+        )}
+
+        {/* 輸入序號 */}
+        {step === 'token' && (
+          <div>
+            <h2 className="font-semibold text-slate-700 mb-3">輸入裝置序號</h2>
+            <p className="text-slate-500 text-sm mb-4">請向管理員索取序號，每組序號僅可使用一次。</p>
+            <input
+              type="text"
+              placeholder="例：A3BK9ZX2"
+              value={registrationToken}
+              onChange={e => setRegistrationToken(e.target.value.toUpperCase())}
+              maxLength={20}
+              className="w-full border border-slate-300 rounded-lg px-4 py-3 text-xl font-mono font-bold tracking-widest text-center focus:outline-none focus:border-blue-500 uppercase"
+              onKeyDown={e => e.key === 'Enter' && tokenValid && submitToken()}
+            />
+            <button
+              onClick={submitToken}
+              disabled={!tokenValid}
+              className="mt-4 w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg font-semibold transition-colors cursor-pointer"
+            >
+              下一步 →
+            </button>
+          </div>
         )}
 
         {/* 選部門 */}
@@ -108,7 +142,7 @@ export function SetupPage() {
             </div>
             <div className="flex gap-3 justify-end mt-6">
               <button
-                onClick={() => setStep('dept')}
+                onClick={() => { setError(null); setStep('dept') }}
                 className="px-4 py-2.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
               >
                 ← 返回
