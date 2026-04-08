@@ -348,7 +348,7 @@ docker compose exec backend npm run seed
 - [ ] 前端刪除/建立按鈕無 loading 防連點
 
 #### P2 — 待處理
-- [ ] 拆單 API 路徑改到 `/api/admin/work-orders/:id/split`（需 JWT 認證）
+- [x] 拆單 API 路徑改到 `/api/admin/work-orders/:id/split`（需 JWT 認證）
 - [ ] 登入端點 `POST /api/admin/auth/login` 加入 rate limiting（IP-based，建議 5 次/分鐘）
 - [ ] CLAUDE.md devices schema 同步更新（補上 `department_id`、`station_id` nullable 變更）
 
@@ -510,14 +510,15 @@ docker compose exec backend npm run seed
 > 驗收：拆單後母單 QR 失效；部署到 VM 後平板可正常存取
 
 #### Backend — 拆單 API
-- [ ] `POST /api/work-orders/:id/split`
-  - [ ] 驗數量總和 = 母單 `planned_qty`（`SPLIT_QTY_MISMATCH`）
-  - [ ] 取母單最新一筆 log 的站點作為子單起始站
-  - [ ] 建立子單（繼承產品、路由，設 `parent_work_order_id`）
-  - [ ] 母單狀態改 `split`，QR Code 立即失效
-  - [ ] 寫入 `split_logs` + `audit_logs`
-- [ ] `GET /api/work-orders/:id/split-history`
-- [ ] `GET /health`（健康檢查 endpoint）
+- [x] `POST /api/admin/work-orders/:id/split`（需 JWT，SplitService.ts）
+  - [x] 驗數量總和 = 母單 `planned_qty`（`SPLIT_QTY_MISMATCH`）
+  - [x] 有進行中 check-in 時改 status=abnormal
+  - [x] 建立子單（繼承產品、路由，設 `parent_work_order_id`）
+  - [x] 母單狀態改 `split`，QR Code 立即失效
+  - [x] 寫入 `split_logs` + `audit_logs`
+  - [x] 回傳子單列表 + 各自 QR Code（base64）
+- [x] `GET /api/admin/work-orders/:id/split-history`
+- [x] `GET /health`（已存在於 index.ts:43）
 
 #### Frontend — 拆單介面
 - [ ] 工單詳情頁加「拆單」按鈕（母單且非 split 才顯示）

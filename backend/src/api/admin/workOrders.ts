@@ -7,6 +7,7 @@ import { workOrders, products, processRoutes, departments, stationLogs, stations
 import { adminAuth } from '../../middleware/adminAuth'
 import { sendSuccess } from '../../utils/response'
 import { AppError, ErrorCode } from '../../utils/errors'
+import { SplitService } from '../../services/SplitService'
 
 const router = Router()
 router.use(adminAuth)
@@ -285,6 +286,62 @@ router.get('/print', async (req, res, next) => {
     )
 
     sendSuccess(res, results.filter(Boolean))
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── Split ─────────────────────────────────────────────────────────────────────
+
+const SplitSchema = z.object({
+  splitReason: z.enum(['rush', 'batch_shipment']),
+  splitNote: z.string().max(500).optional(),
+  children: z.array(
+    z.object({
+      plannedQty: z.number().int().min(1),
+      priority: z.enum(['normal', 'urgent']).optional(),
+      dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+    }),
+  ).min(2, '至少需要 2 張子單'),
+})
+
+// POST /api/admin/work-orders/:id/split
+router.post('/:id/split', async (req, res, next) => {
+  try {
+    const { id } = req.params as { id: string }
+    const parsed = SplitSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid body'))
+    }
+
+    const result = await SplitService.split({
+      parentId: id,
+      children: parsed.data.children,
+      splitReason: parsed.data.splitReason,
+      splitNote: parsed.data.splitNote,
+    })
+
+    sendSuccess(res, result, 201)
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /api/admin/work-orders/:id/split-history
+router.get('/:id/split-history', async (req, res, next) => {
+  try {
+    const { id } = req.params as { id: string }
+
+    const [wo] = await db
+      .select({ id: workOrders.id })
+      .from(workOrders)
+      .where(eq(workOrders.id, id))
+      .limit(1)
+
+    if (!wo) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
+
+    const history = await SplitService.getSplitHistory(id)
+    sendSuccess(res, { items: history })
   } catch (err) {
     next(err)
   }
