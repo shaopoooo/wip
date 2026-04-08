@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { workOrdersApi, routesApi, WorkOrderDetail, ProcessStep } from '../../api/admin'
+import { SplitModal } from '../../components/SplitModal'
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '待開工', in_progress: '進行中', completed: '已完工', cancelled: '已取消', split: '已拆單',
@@ -30,6 +31,7 @@ export function WorkOrderDetailPage() {
   const [routeSteps, setRouteSteps] = useState<ProcessStep[]>([])
   const [loading, setLoading] = useState(true)
   const [statusChanging, setStatusChanging] = useState(false)
+  const [splitOpen, setSplitOpen] = useState(false)
   const printRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -57,6 +59,11 @@ export function WorkOrderDetailPage() {
     }
   }
 
+  const handleSplitSuccess = () => {
+    if (!id) return
+    workOrdersApi.get(id).then(setDetail).catch(() => {})
+  }
+
   const handlePrint = () => {
     window.print()
   }
@@ -80,6 +87,16 @@ export function WorkOrderDetailPage() {
 
   return (
     <div className="p-6 max-w-4xl">
+      {id && (
+        <SplitModal
+          open={splitOpen}
+          onClose={() => setSplitOpen(false)}
+          workOrderId={id}
+          orderNumber={wo.orderNumber}
+          totalQty={wo.plannedQty}
+          onSuccess={handleSplitSuccess}
+        />
+      )}
       <button onClick={() => navigate('/admin/work-orders')} className="text-slate-500 hover:text-slate-800 text-sm mb-4 cursor-pointer transition-colors">
         ← 返回工單列表
       </button>
@@ -116,6 +133,12 @@ export function WorkOrderDetailPage() {
             {/* Status change */}
             {!['completed', 'split', 'cancelled'].includes(wo.status) && (
               <div className="mt-4 pt-4 border-t border-slate-100 flex gap-2">
+                <button
+                  onClick={() => setSplitOpen(true)}
+                  className="border border-amber-400 text-amber-700 hover:bg-amber-50 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  拆單
+                </button>
                 {wo.status !== 'cancelled' && (
                   <button
                     onClick={() => handleStatusChange('cancelled')}

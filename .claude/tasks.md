@@ -521,9 +521,9 @@ docker compose exec backend npm run seed
 - [x] `GET /health`（已存在於 index.ts:43）
 
 #### Frontend — 拆單介面
-- [ ] 工單詳情頁加「拆單」按鈕（母單且非 split 才顯示）
-- [ ] 拆單 modal（選原因 → 輸入子單數量/交期/優先級 → 即時驗證總和）
-- [ ] 拆單後顯示子單列表 + 各自 QR Code
+- [x] 工單詳情頁加「拆單」按鈕（母單且非 split 才顯示）
+- [x] 拆單 modal（選原因 → 輸入子單數量/交期/優先級 → 即時驗證總和）
+- [x] 拆單後顯示子單列表 + 各自 QR Code
 
 #### DevOps — 上線準備
 - [ ] Nginx config（反向代理 `/api` → backend，其他 → front 靜態，gzip）

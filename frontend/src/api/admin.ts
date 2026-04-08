@@ -326,6 +326,21 @@ export const routesApi = {
 
 // ── Work Orders ───────────────────────────────────────────────────────────────
 
+export interface SplitChildResult {
+  id: string
+  orderNumber: string
+  plannedQty: number
+  priority: string
+  dueDate: string | null
+  qrDataUrl: string
+}
+
+export interface SplitResult {
+  parentOrderNumber: string
+  parentStatus: string
+  children: SplitChildResult[]
+}
+
 export const workOrdersApi = {
   list: (p: TableQuery & { departmentId: string; status?: string }) => {
     const q = buildTableQuery(p)
@@ -341,6 +356,11 @@ export const workOrdersApi = {
   updateStatus: (id: string, status: string) => patch<WorkOrder>(`/work-orders/${id}/status`, { status }),
   qrcode: (id: string) => get<{ orderNumber: string; qrDataUrl: string; status: string }>(`/work-orders/${id}/qrcode`),
   print: (ids: string[]) => get<({ orderNumber: string; qrDataUrl: string; productName: string; modelNumber: string; plannedQty: number; dueDate: string | null; priority: string })[]>(`/work-orders/print?ids=${ids.join(',')}`),
+  split: (id: string, data: {
+    splitReason: 'rush' | 'batch_shipment'
+    splitNote?: string
+    children: { plannedQty: number; priority?: 'normal' | 'urgent'; dueDate?: string | null }[]
+  }) => post<SplitResult>(`/work-orders/${id}/split`, data),
 }
 
 // ── Device Tokens ─────────────────────────────────────────────────────────────
