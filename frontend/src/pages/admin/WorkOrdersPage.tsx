@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { workOrdersApi, productsApi, routesApi, departmentsApi, WorkOrderRow, Product, ProcessRoute, Department } from '../../api/admin'
+import { workOrdersApi, productsApi, departmentsApi, WorkOrderRow, Product, Department } from '../../api/admin'
 import { useServerTable } from '../../hooks/useServerTable'
 import { TableControls } from '../../components/TableControls'
 
@@ -89,9 +89,9 @@ export function WorkOrdersPage() {
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">工單號</th>
-              <th className="text-left px-4 py-3 font-semibold text-slate-600">產品</th>
-              <th className="text-left px-4 py-3 font-semibold text-slate-600">製作數量</th>
+              <th className="text-left px-4 py-3 font-semibold text-slate-600">製程 / 料號</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">訂單數量</th>
+              <th className="text-left px-4 py-3 font-semibold text-slate-600">製作數量</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">狀態</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">優先</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">交期</th>
@@ -108,9 +108,9 @@ export function WorkOrdersPage() {
             {st.items.map(({ workOrder: wo, product }) => (
               <tr key={wo.id} className="border-b border-slate-100 hover:bg-slate-50">
                 <td className="px-4 py-3 font-mono font-semibold text-slate-800">{wo.orderNumber}</td>
-                <td className="px-4 py-3 text-slate-700">{product.name}<span className="text-slate-400 ml-1 text-xs">{product.modelNumber}</span></td>
-                <td className="px-4 py-3 text-slate-700">{wo.plannedQty}</td>
-                <td className="px-4 py-3 text-slate-500">{wo.orderQty ?? '—'}</td>
+                <td className="px-4 py-3 font-mono text-slate-800">{product.modelNumber}<span className="text-slate-400 ml-1 text-xs font-sans">{product.name}</span></td>
+                <td className="px-4 py-3 text-slate-700">{wo.orderQty ?? '—'}</td>
+                <td className="px-4 py-3 text-slate-500">{wo.plannedQty}</td>
                 <td className="px-4 py-3">
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLOR[wo.status] ?? 'bg-slate-100 text-slate-600'}`}>
                     {STATUS_LABEL[wo.status] ?? wo.status}
@@ -122,7 +122,7 @@ export function WorkOrdersPage() {
                 <td className="px-4 py-3 text-slate-500 text-xs">{wo.dueDate ?? '—'}</td>
                 <td className="px-4 py-3 text-right">
                   <button
-                    onClick={() => navigate(`/admin/work-orders/${wo.id}`)}
+                    onClick={() => navigate(`/admin/work-orders/${wo.orderNumber}`)}
                     className="text-blue-600 hover:text-blue-800 text-xs font-medium cursor-pointer"
                   >
                     詳情 / QR →
@@ -154,44 +154,60 @@ function CreateWorkOrderModal({
 }) {
   const [deptId, setDeptId] = useState(depts[0]?.id ?? '')
   const [productId, setProductId] = useState('')
-  const [routeId, setRouteId] = useState('')
-  const [plannedQty, setPlannedQty] = useState(1)
-  const [orderQty, setOrderQty] = useState<number | ''>('')
+  const [orderQty, setOrderQty] = useState(1)
+  const [plannedQty, setPlannedQty] = useState<number | ''>('')
   const [priority, setPriority] = useState<'normal' | 'urgent'>('normal')
   const [dueDate, setDueDate] = useState('')
+  const [note, setNote] = useState('')
   const [products, setProducts] = useState<Product[]>([])
-  const [routes, setRoutes] = useState<ProcessRoute[]>([])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+
+  // fuzzy search state
+  const [searchText, setSearchText] = useState('')
+  const [showDropdown, setShowDropdown] = useState(false)
 
   useEffect(() => {
     if (!deptId) return
     productsApi.listAll(deptId).then(d => {
       setProducts(d)
-      const first = d[0]
-      setProductId(first?.id ?? '')
-      setRouteId(first?.routeId ?? '')
     }).catch(() => {})
-    routesApi.listAll(deptId).then(d => setRoutes(d)).catch(() => {})
+    // reset when dept changes
+    setProductId('')
+    setSearchText('')
   }, [deptId])
 
-  const handleProductChange = (id: string) => {
-    setProductId(id)
-    const p = products.find(x => x.id === id)
-    if (p?.routeId) setRouteId(p.routeId)
+  const filteredProducts = searchText.trim()
+    ? products.filter(p =>
+        p.modelNumber.toLowerCase().includes(searchText.toLowerCase()) ||
+        p.name.toLowerCase().includes(searchText.toLowerCase())
+      ).slice(0, 5)
+    : products.slice(0, 5)
+
+  const selectedProduct = products.find(p => p.id === productId)
+
+  const handleSelectProduct = (p: Product) => {
+    setProductId(p.id)
+    setSearchText(p.modelNumber)
+    setShowDropdown(false)
   }
 
   const handleSubmit = async () => {
-    if (!deptId || !productId || !routeId || plannedQty < 1) {
+    if (!productId) {
+      setError('物料編號不正確，請重新輸入並從下拉選單中選擇')
+      return
+    }
+    if (!deptId || orderQty < 1) {
       setError('請填寫所有必填欄位')
       return
     }
     setSaving(true); setError(null)
     try {
       await workOrdersApi.create({
-        departmentId: deptId, productId, routeId, plannedQty,
-        orderQty: orderQty !== '' ? orderQty : undefined,
+        departmentId: deptId, productId, orderQty,
+        plannedQty: plannedQty !== '' ? plannedQty : undefined,
         priority, dueDate: dueDate || null,
+        note: note.trim() || null,
       })
       onCreated()
     } catch (err) {
@@ -212,24 +228,57 @@ function CreateWorkOrderModal({
               {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           </Field>
-          <Field label="產品型號">
-            <select value={productId} onChange={e => handleProductChange(e.target.value)} className={SELECT_CLS}>
-              {products.length === 0 && <option value="">（無產品）</option>}
-              {products.map(p => <option key={p.id} value={p.id}>{p.name} — {p.modelNumber}</option>)}
-            </select>
-          </Field>
-          <Field label="製程路由">
-            <select value={routeId} onChange={e => setRouteId(e.target.value)} className={SELECT_CLS}>
-              {routes.length === 0 && <option value="">（無路由）</option>}
-              {routes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
+          <Field label="物料編號">
+            <div className="relative">
+              <input
+                value={searchText}
+                onChange={e => { setSearchText(e.target.value); setShowDropdown(true); setProductId(''); setError(null) }}
+                onFocus={() => { if (!productId) setShowDropdown(true) }}
+                onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+                className={`${INPUT_CLS} ${searchText.trim() && !productId ? 'border-red-300' : ''}`}
+                placeholder="輸入物料編號搜尋..."
+                autoComplete="off"
+              />
+              {showDropdown && !productId && filteredProducts.length > 0 && (
+                <ul className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  {filteredProducts.map(p => (
+                    <li
+                      key={p.id}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleSelectProduct(p)}
+                      className="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 flex justify-between items-center"
+                    >
+                      <span className="font-mono">{p.modelNumber}</span>
+                      <span className="text-slate-400 text-xs truncate ml-2">{p.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {showDropdown && !productId && searchText.trim() && filteredProducts.length === 0 && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg px-3 py-2 text-sm text-slate-400">
+                  找不到符合的產品
+                </div>
+              )}
+            </div>
+            {searchText.trim() && !productId && !showDropdown && (
+              <p className="text-xs text-red-500 mt-1">物料編號不正確，請重新輸入並從下拉選單中選擇</p>
+            )}
+            {selectedProduct && (
+              <p className="text-xs text-slate-500 mt-1">
+                {selectedProduct.name}
+                {selectedProduct.routeId
+                  ? <span className="text-emerald-600 ml-2">已設定製程</span>
+                  : <span className="text-red-500 ml-2">未設定製程</span>
+                }
+              </p>
+            )}
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="製作數量">
-              <input type="number" min={1} value={plannedQty} onChange={e => setPlannedQty(Number(e.target.value))} className={INPUT_CLS} />
+            <Field label="訂單數量">
+              <input type="number" min={1} value={orderQty} onChange={e => setOrderQty(Number(e.target.value))} className={INPUT_CLS} />
             </Field>
-            <Field label="訂單需求數量（選填）">
-              <input type="number" min={1} value={orderQty} onChange={e => setOrderQty(e.target.value === '' ? '' : Number(e.target.value))} className={INPUT_CLS} placeholder="同製作數量" />
+            <Field label="製作數量（選填）">
+              <input type="number" min={1} value={plannedQty} onChange={e => setPlannedQty(e.target.value === '' ? '' : Number(e.target.value))} className={INPUT_CLS} placeholder="同訂單數量" />
             </Field>
           </div>
           <Field label="優先級">
@@ -240,6 +289,9 @@ function CreateWorkOrderModal({
           </Field>
           <Field label="交期（選填）">
             <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className={INPUT_CLS} />
+          </Field>
+          <Field label="備註（選填）">
+            <textarea value={note} onChange={e => setNote(e.target.value)} className={INPUT_CLS} rows={2} placeholder="工單備註..." />
           </Field>
         </div>
 

@@ -41,16 +41,20 @@ router.get('/preview', deviceAuth, async (req, res, next) => {
 
     const device = req.device!
 
-    // Work order + product
+    // Work order + product (including product's latest routeId)
     const woRows = await db
-      .select({ wo: workOrders, product: { name: products.name, modelNumber: products.modelNumber } })
+      .select({
+        wo: workOrders,
+        product: { name: products.name, modelNumber: products.modelNumber },
+        productRouteId: products.routeId,
+      })
       .from(workOrders)
       .innerJoin(products, eq(workOrders.productId, products.id))
       .where(eq(workOrders.orderNumber, orderNumber))
       .limit(1)
 
     if (woRows.length === 0) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
-    const { wo, product } = woRows[0]!
+    const { wo, product, productRouteId } = woRows[0]!
 
     if (wo.status === 'cancelled' || wo.status === 'completed')
       return next(new AppError(ErrorCode.ORDER_CLOSED, `工單已${wo.status === 'cancelled' ? '取消' : '完工'}`))
@@ -62,11 +66,20 @@ router.get('/preview', deviceAuth, async (req, res, next) => {
       return next(new AppError(ErrorCode.WRONG_DEPARTMENT, '此裝置不屬於本產線，無法預覽此工單'))
     }
 
+    // Always use product's latest routeId — sync to work order if changed
+    const latestRouteId = productRouteId ?? wo.routeId
+    if (!latestRouteId) return next(new AppError(ErrorCode.VALIDATION_ERROR, '此工單的產品尚未設定製程路由'))
+
+    if (latestRouteId !== wo.routeId) {
+      await db.update(workOrders).set({ routeId: latestRouteId, updatedAt: new Date() }).where(eq(workOrders.id, wo.id))
+      wo.routeId = latestRouteId
+    }
+
     // Process Steps
     const steps = await db
       .select()
       .from(processSteps)
-      .where(eq(processSteps.routeId, wo.routeId))
+      .where(eq(processSteps.routeId, latestRouteId))
       .orderBy(processSteps.stepOrder)
 
     if (steps.length === 0) return next(new AppError(ErrorCode.NOT_FOUND, '製程無步驟', 500))

@@ -123,6 +123,22 @@ router.patch('/:id', async (req, res, next) => {
   }
 })
 
+// PATCH /api/admin/groups/reorder — batch update sort orders
+router.patch('/reorder', async (req, res, next) => {
+  try {
+    const parsed = z.array(z.object({ id: z.string().uuid(), sortOrder: z.number().int().min(0) })).safeParse(req.body)
+    if (!parsed.success) return next(new AppError(ErrorCode.VALIDATION_ERROR, 'Invalid body'))
+
+    for (const item of parsed.data) {
+      await db.update(groups).set({ sortOrder: item.sortOrder, updatedAt: new Date() }).where(eq(groups.id, item.id))
+    }
+
+    sendSuccess(res, null)
+  } catch (err) {
+    next(err)
+  }
+})
+
 // DELETE /api/admin/groups/:id (soft delete)
 router.delete('/:id', async (req, res, next) => {
   try {

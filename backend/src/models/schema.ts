@@ -249,7 +249,6 @@ export const workOrders = pgTable(
       .notNull()
       .references(() => products.id),
     routeId: uuid('route_id')
-      .notNull()
       .references(() => processRoutes.id),
     plannedQty: integer('planned_qty').notNull(),   // 製作數量
     orderQty: integer('order_qty'),                  // 訂單需求數量
@@ -260,6 +259,7 @@ export const workOrders = pgTable(
     parentWorkOrderId: uuid('parent_work_order_id'),  // self-ref FK defined below
     splitReason: varchar('split_reason', { length: 20 }), // rush | batch_shipment
     isSplit: boolean('is_split').default(false),
+    note: text('note'),                         // 備註
     salesOrderId: uuid('sales_order_id'),    // Phase 3
     scheduledStart: timestamp('scheduled_start', { withTimezone: true }), // Phase 3
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

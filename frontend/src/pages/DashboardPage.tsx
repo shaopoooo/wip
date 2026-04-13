@@ -48,6 +48,7 @@ type GroupedWip = {
   groupSortOrder: number
   stations: WipStation[]
   totalWip: number
+  totalQueuing: number
 }
 
 type DeptSection = {
@@ -62,11 +63,12 @@ function groupStations(stations: WipStation[]): GroupedWip[] {
   for (const s of stations) {
     const key = s.groupId ?? '__none__'
     if (!map.has(key)) {
-      map.set(key, { groupId: s.groupId, groupName: s.groupName, groupStage: s.groupStage, groupSortOrder: s.groupSortOrder, stations: [], totalWip: 0 })
+      map.set(key, { groupId: s.groupId, groupName: s.groupName, groupStage: s.groupStage, groupSortOrder: s.groupSortOrder, stations: [], totalWip: 0, totalQueuing: 0 })
     }
     const g = map.get(key)!
     g.stations.push(s)
     g.totalWip += s.wipCount
+    g.totalQueuing += s.queuingCount
   }
   return [...map.values()].sort((a, b) => a.groupSortOrder - b.groupSortOrder)
 }
@@ -102,44 +104,41 @@ function WipCard({ station, isExpanded, onToggle }: { station: WipStation; isExp
   return (
     <button
       onClick={onToggle}
-      className={`flex flex-col items-center rounded-xl border px-3 py-2 min-w-[76px] gap-0.5 transition-all cursor-pointer ${wipBg(station.wipCount)} ${isExpanded ? 'ring-2 ring-blue-400 scale-105' : 'hover:scale-105'}`}
+      className={`relative flex flex-col items-center rounded-xl border px-3 py-2 min-w-[76px] gap-0.5 transition-all cursor-pointer ${wipBg(station.wipCount)} ${isExpanded ? 'ring-2 ring-blue-400 scale-105' : 'hover:scale-105'}`}
     >
+      {station.queuingCount > 0 && (
+        <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center bg-orange-500 text-white text-[10px] font-bold rounded-full px-1 border-2 border-slate-900 animate-pulse">
+          {station.queuingCount}
+        </span>
+      )}
       <span className="text-xl font-black leading-none">{station.wipCount}</span>
       <span className="text-[11px] font-medium text-center leading-tight max-w-[68px] break-words">{station.stationName}</span>
     </button>
   )
 }
 
-function StationDetail({ station, mode, onClose }: { station: WipStation; mode: 'in_station' | 'queuing'; onClose: () => void }) {
-  const [workOrders, setWorkOrders] = useState<StationWorkOrder[]>([])
+function StationDetail({ station, onClose }: { station: WipStation; onClose: () => void }) {
+  const [inStation, setInStation] = useState<StationWorkOrder[]>([])
+  const [queuing, setQueuing] = useState<StationWorkOrder[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    dashboardApi.stationWorkOrders(station.stationId, mode)
-      .then(setWorkOrders)
-      .catch(() => setWorkOrders([]))
+    Promise.all([
+      station.wipCount > 0 ? dashboardApi.stationWorkOrders(station.stationId, 'in_station') : Promise.resolve([]),
+      station.queuingCount > 0 ? dashboardApi.stationWorkOrders(station.stationId, 'queuing') : Promise.resolve([]),
+    ])
+      .then(([ins, q]) => { setInStation(ins); setQueuing(q) })
+      .catch(() => { setInStation([]); setQueuing([]) })
       .finally(() => setLoading(false))
-  }, [station.stationId, mode])
+  }, [station.stationId, station.wipCount, station.queuingCount])
 
-  return (
-    <div className="bg-slate-800 border border-slate-600 rounded-xl p-3 mt-2 animate-in">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-bold text-slate-100">{station.stationName}</span>
-          <span className="text-xs text-slate-400 bg-slate-700 px-2 py-0.5 rounded-full">
-            {mode === 'in_station' ? '站內工單' : '待入站工單'}
-          </span>
-        </div>
-        <button onClick={onClose} className="text-slate-400 hover:text-white text-sm px-1.5 cursor-pointer">✕</button>
-      </div>
-      {loading ? (
-        <div className="text-center text-slate-500 text-xs py-3">載入中...</div>
-      ) : workOrders.length === 0 ? (
-        <div className="text-center text-slate-500 text-xs py-3">目前無工單</div>
-      ) : (
-        <div className="space-y-1 max-h-40 overflow-y-auto">
-          {workOrders.map(wo => (
+  const renderList = (items: StationWorkOrder[], label: string) => (
+    items.length > 0 && (
+      <div>
+        <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">{label}</p>
+        <div className="space-y-1 max-h-32 overflow-y-auto">
+          {items.map(wo => (
             <div
               key={wo.id}
               className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-slate-700/50 hover:bg-slate-700 transition-colors cursor-pointer text-xs"
@@ -154,29 +153,47 @@ function StationDetail({ station, mode, onClose }: { station: WipStation; mode: 
             </div>
           ))}
         </div>
+      </div>
+    )
+  )
+
+  return (
+    <div className="bg-slate-800 border border-slate-600 rounded-xl p-3 mt-2 animate-in">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-bold text-slate-100">{station.stationName}</span>
+        <button onClick={onClose} className="text-slate-400 hover:text-white text-sm px-1.5 cursor-pointer">✕</button>
+      </div>
+      {loading ? (
+        <div className="text-center text-slate-500 text-xs py-3">載入中...</div>
+      ) : inStation.length === 0 && queuing.length === 0 ? (
+        <div className="text-center text-slate-500 text-xs py-3">目前無工單</div>
+      ) : (
+        <div className="space-y-2">
+          {renderList(inStation, `站內 (${inStation.length})`)}
+          {renderList(queuing, `待入站 (${queuing.length})`)}
+        </div>
       )}
     </div>
   )
 }
 
-function WipGroupSection({ group, showEmpty, expandedStation, onStationToggle, wipMode }: {
+function WipGroupSection({ group, showEmpty, expandedStation, onStationToggle }: {
   group: GroupedWip
   showEmpty: boolean
   expandedStation: string | null
   onStationToggle: (stationId: string) => void
-  wipMode: 'in_station' | 'queuing'
 }) {
-  const [collapsed, setCollapsed] = useState(group.totalWip === 0)
-  const visibleStations = showEmpty ? group.stations : group.stations.filter(s => s.wipCount > 0)
+  const hasActivity = group.totalWip > 0 || group.totalQueuing > 0
+  const [collapsed, setCollapsed] = useState(!hasActivity)
+  const visibleStations = showEmpty ? group.stations : group.stations.filter(s => s.wipCount > 0 || s.queuingCount > 0)
 
-  // Auto-collapse when no WIP
+  // Auto-collapse when no activity
   useEffect(() => {
-    if (group.totalWip === 0 && !showEmpty) setCollapsed(true)
+    if (!hasActivity && !showEmpty) setCollapsed(true)
     else setCollapsed(false)
-  }, [group.totalWip, showEmpty])
+  }, [hasActivity, showEmpty])
 
-  if (!showEmpty && group.totalWip === 0) {
-    // Collapsed summary line
+  if (!showEmpty && !hasActivity) {
     return (
       <button
         onClick={() => setCollapsed(c => !c)}
@@ -184,13 +201,13 @@ function WipGroupSection({ group, showEmpty, expandedStation, onStationToggle, w
       >
         <span className="font-medium">{group.groupName ?? '未分組'}</span>
         {group.groupStage && <span className="text-slate-600">· {group.groupStage}</span>}
-        <span className="ml-auto">{group.stations.length} 站 · 0 張</span>
+        <span className="ml-auto">{group.stations.length} 站</span>
       </button>
     )
   }
 
   return (
-    <div className={`rounded-xl border ${group.totalWip > 0 ? 'border-slate-600 bg-slate-800' : 'border-slate-700/50 bg-slate-800/40'}`}>
+    <div className={`rounded-xl border ${hasActivity ? 'border-slate-600 bg-slate-800' : 'border-slate-700/50 bg-slate-800/40'}`}>
       <button
         onClick={() => setCollapsed(c => !c)}
         className="w-full flex items-center gap-2 px-3 py-2 border-b border-slate-700/50 cursor-pointer hover:bg-slate-700/20 transition-colors"
@@ -200,9 +217,10 @@ function WipGroupSection({ group, showEmpty, expandedStation, onStationToggle, w
         {group.groupStage && (
           <span className="text-[10px] text-slate-400 bg-slate-700 px-1.5 py-0.5 rounded-full">{group.groupStage}</span>
         )}
-        <span className="ml-auto text-xs text-slate-400">
-          {group.totalWip > 0 && <span className="font-bold text-emerald-400 mr-1">{group.totalWip} 張</span>}
-          {group.stations.length} 站
+        <span className="ml-auto flex items-center gap-2 text-xs text-slate-400">
+          {group.totalWip > 0 && <span className="font-bold text-emerald-400">{group.totalWip} 站內</span>}
+          {group.totalQueuing > 0 && <span className="font-bold text-orange-400">{group.totalQueuing} 待入站</span>}
+          <span>{group.stations.length} 站</span>
         </span>
       </button>
       {!collapsed && (
@@ -220,7 +238,6 @@ function WipGroupSection({ group, showEmpty, expandedStation, onStationToggle, w
           {expandedStation && group.stations.find(s => s.stationId === expandedStation) && (
             <StationDetail
               station={group.stations.find(s => s.stationId === expandedStation)!}
-              mode={wipMode}
               onClose={() => onStationToggle(expandedStation)}
             />
           )}
@@ -257,20 +274,27 @@ function WoRow({ wo }: { wo: WorkOrderProgress }) {
           <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${statusBadge(wo.status)}`}>
             {statusLabel(wo.status)}
           </span>
+          {wo.status === 'in_progress' && wo.currentStationName && (
+            <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-700 text-slate-300">
+              {wo.currentStationName}
+            </span>
+          )}
+          {wo.status === 'in_progress' && !wo.currentStationName && (
+            <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-700/50 text-slate-500">
+              待入站
+            </span>
+          )}
         </div>
         <span className="text-[11px] text-slate-400 truncate block">{wo.productName}</span>
       </div>
       <div className="flex flex-col items-end gap-1 shrink-0">
         <ProgressBar completed={wo.completedSteps} total={wo.totalSteps} />
-        <span className="text-[10px] text-slate-500">
-          {wo.currentStationName
-            ? `📍 ${wo.currentStationName}`
-            : wo.lastActivityAt
-              ? `${formatDateShort(wo.lastActivityAt)}`
-              : wo.dueDate
-                ? `交期 ${formatDateShort(wo.dueDate)}`
-                : '待開始'}
-        </span>
+        <div className="flex items-center gap-2 text-[10px] text-slate-500">
+          {wo.lastActivityAt
+            ? <span>{wo.lastActivityType === 'in' ? '入站' : '出站'} {formatDateShort(wo.lastActivityAt)} {formatTime(wo.lastActivityAt).slice(0, 5)}</span>
+            : <span>待開始</span>}
+          {wo.dueDate && <span className={wo.dueDate < new Date().toISOString().slice(0, 10) ? 'text-red-400 font-semibold' : ''}>交期 {formatDateShort(wo.dueDate)}</span>}
+        </div>
       </div>
     </div>
   )
@@ -283,7 +307,6 @@ const POLL_MS = 30_000
 export function DashboardPage() {
   const [depts, setDepts] = useState<Department[]>([])
   const [activeDeptId, setActiveDeptId] = useState<string | undefined>()
-  const [wipMode, setWipMode] = useState<'in_station' | 'queuing'>('in_station')
   const [showEmpty, setShowEmpty] = useState(false)
   const [expandedStation, setExpandedStation] = useState<string | null>(null)
 
@@ -299,7 +322,7 @@ export function DashboardPage() {
   const fetchAll = useCallback(async () => {
     try {
       const [wip, today, prog] = await Promise.all([
-        dashboardApi.wip({ departmentId: activeDeptId, mode: wipMode }),
+        dashboardApi.wip({ departmentId: activeDeptId }),
         dashboardApi.today(activeDeptId),
         dashboardApi.workOrderProgress({ departmentId: activeDeptId }),
       ])
@@ -313,7 +336,7 @@ export function DashboardPage() {
     } finally {
       setLoading(false)
     }
-  }, [activeDeptId, wipMode])
+  }, [activeDeptId])
 
   useEffect(() => {
     departmentsApi.list().then(setDepts).catch(() => {/* ignore */})
@@ -333,7 +356,8 @@ export function DashboardPage() {
   const groupedWip = activeDeptId ? groupStations(filteredWip) : null
   const deptSections = !activeDeptId ? groupByDept(filteredWip, depts) : null
   const totalWip = filteredWip.reduce((s, st) => s + st.wipCount, 0)
-  const stationsWithWip = filteredWip.filter(s => s.wipCount > 0).length
+  const totalQueuing = filteredWip.reduce((s, st) => s + st.queuingCount, 0)
+  const stationsWithActivity = filteredWip.filter(s => s.wipCount > 0 || s.queuingCount > 0).length
   const totalStations = filteredWip.length
 
   const handleStationToggle = (stationId: string) => {
@@ -363,18 +387,6 @@ export function DashboardPage() {
           ))}
         </div>
         <div className="flex-1" />
-        {/* WIP mode toggle */}
-        <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-0.5 text-xs">
-          {(['in_station', 'queuing'] as const).map(m => (
-            <button
-              key={m}
-              onClick={() => setWipMode(m)}
-              className={`px-3 py-1 rounded-md font-medium transition-colors cursor-pointer ${wipMode === m ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}
-            >
-              {m === 'in_station' ? '站內 WIP' : '待入站'}
-            </button>
-          ))}
-        </div>
         {/* Show empty toggle */}
         <button
           onClick={() => setShowEmpty(v => !v)}
@@ -402,11 +414,19 @@ export function DashboardPage() {
           <StatCard value={todayStats.totals.activeOrders} label="生產中工單" color="text-amber-400" />
           <div className="flex-1" />
           <div className="flex flex-col items-end">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">站內 WIP</span>
-              <span className={`text-2xl font-black ${totalWip > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>{totalWip}</span>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-slate-500">站內</span>
+                <span className={`text-2xl font-black ${totalWip > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>{totalWip}</span>
+              </div>
+              {totalQueuing > 0 && (
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-slate-500">待入站</span>
+                  <span className="text-2xl font-black text-orange-400">{totalQueuing}</span>
+                </div>
+              )}
             </div>
-            <span className="text-[10px] text-slate-600">{stationsWithWip}/{totalStations} 站有 WIP</span>
+            <span className="text-[10px] text-slate-600">{stationsWithActivity}/{totalStations} 站有工單</span>
           </div>
         </div>
       )}
@@ -428,7 +448,6 @@ export function DashboardPage() {
                   showEmpty={showEmpty}
                   expandedStation={expandedStation}
                   onStationToggle={handleStationToggle}
-                  wipMode={wipMode}
                 />
               ))}
               {deptSections && deptSections.map(section => (
@@ -448,8 +467,7 @@ export function DashboardPage() {
                         showEmpty={showEmpty}
                         expandedStation={expandedStation}
                         onStationToggle={handleStationToggle}
-                        wipMode={wipMode}
-                      />
+                            />
                     ))}
                   </div>
                 </div>

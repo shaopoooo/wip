@@ -139,9 +139,9 @@ export interface WorkOrder {
 }
 
 export interface WorkOrderRow {
-  workOrder: WorkOrder
-  product: { name: string; modelNumber: string }
-  route?: { name: string }
+  workOrder: WorkOrder & { note?: string | null }
+  product: { name: string; modelNumber: string; description?: string | null }
+  route?: { name: string; description?: string | null }
 }
 
 export interface WorkOrderDetail extends WorkOrderRow {
@@ -214,6 +214,7 @@ export const groupsApi = {
   update: (id: string, data: Partial<{ name: string; code: string | null; stage: string | null; description: string | null; sortOrder: number }>) =>
     patch<Group>(`/groups/${id}`, data),
   delete: (id: string) => del<null>(`/groups/${id}`),
+  reorder: (items: { id: string; sortOrder: number }[]) => patch<null>('/groups/reorder', items),
 }
 
 // ── Stations ──────────────────────────────────────────────────────────────────
@@ -350,12 +351,17 @@ export const workOrdersApi = {
   },
   get: (id: string) => get<WorkOrderDetail>(`/work-orders/${id}`),
   create: (data: {
-    departmentId: string; productId: string; routeId: string
-    plannedQty: number; orderQty?: number | null; priority?: string; dueDate?: string | null
+    departmentId: string; productId: string
+    orderQty: number; plannedQty?: number; priority?: string; dueDate?: string | null
+    note?: string | null
   }) => post<WorkOrder>('/work-orders', data),
+  update: (id: string, data: Partial<{
+    orderQty: number; plannedQty: number; priority: string
+    dueDate: string | null; note: string | null; productId: string
+  }>) => patch<WorkOrder>(`/work-orders/${id}`, data),
   updateStatus: (id: string, status: string) => patch<WorkOrder>(`/work-orders/${id}/status`, { status }),
   qrcode: (id: string) => get<{ orderNumber: string; qrDataUrl: string; status: string }>(`/work-orders/${id}/qrcode`),
-  print: (ids: string[]) => get<({ orderNumber: string; qrDataUrl: string; productName: string; modelNumber: string; plannedQty: number; dueDate: string | null; priority: string })[]>(`/work-orders/print?ids=${ids.join(',')}`),
+  print: (ids: string[]) => get<({ orderNumber: string; qrDataUrl: string; productName: string; modelNumber: string; plannedQty: number; orderQty: number | null; dueDate: string | null; priority: string })[]>(`/work-orders/print?ids=${ids.join(',')}`),
   split: (id: string, data: {
     splitReason: 'rush' | 'batch_shipment'
     splitNote?: string

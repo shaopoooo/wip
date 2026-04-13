@@ -1,7 +1,8 @@
-import { and, count, eq, isNull } from 'drizzle-orm'
+import { and, count, eq, inArray, isNull, isNotNull } from 'drizzle-orm'
 import QRCode from 'qrcode'
 import { db, type Db } from '../models/db'
 import { auditLogs, splitLogs, stationLogs, workOrders } from '../models/schema'
+import { asc } from 'drizzle-orm'
 import { AppError, ErrorCode } from '../utils/errors'
 
 // ── Local types ────────────────────────────────────────────────────────────────
@@ -44,25 +45,25 @@ export interface SplitResult {
 /**
  * Determines the suffix type based on parent's order number depth.
  *
- * WO-A-2026-001      → children use -A, -B, -C  (letter suffix)
- * WO-A-2026-001-A    → children use 1, 2, 3      (number suffix, no dash)
+ * 1150409001      → children use -A, -B, -C  (letter suffix)
+ * 1150409001-A    → children use 1, 2, 3      (number suffix, no dash)
  */
 function buildChildOrderNumbers(
   parentOrderNumber: string,
   existingChildCount: number,
   newChildCount: number,
 ): string[] {
-  // Match base pattern: WO-DEPT-YEAR-SEQ with an optional -LETTER at the end
-  const isChildOrder = /^WO-[A-Z]+-\d{4}-\d{3}-[A-Z]$/.test(parentOrderNumber)
+  // A child order ends with -LETTER (e.g. A1150409001-A)
+  const isChildOrder = /-[A-Z]$/.test(parentOrderNumber)
 
   const result: string[] = []
   for (let i = 0; i < newChildCount; i++) {
     const idx = existingChildCount + i
     if (isChildOrder) {
-      // Grandchild: WO-A-2026-001-A → WO-A-2026-001-A1
+      // Grandchild: A1150409001-A → A1150409001-A1
       result.push(`${parentOrderNumber}${idx + 1}`)
     } else {
-      // Child: WO-A-2026-001 → WO-A-2026-001-A
+      // Child: A1150409001 → A1150409001-A
       result.push(`${parentOrderNumber}-${String.fromCharCode(65 + idx)}`)
     }
   }
@@ -106,11 +107,21 @@ export class SplitService {
         )
       }
 
-      // 3. Mark in-progress station_logs as abnormal
+      // 3. Close in-progress station_logs as 'split' (not abnormal)
       await tx
         .update(stationLogs)
-        .set({ status: 'abnormal' })
+        .set({ status: 'split', checkOutTime: new Date() })
         .where(and(eq(stationLogs.workOrderId, parentId), isNull(stationLogs.checkOutTime)))
+
+      // 3.5. Fetch all closed logs from parent to inherit
+      const parentLogs = await tx
+        .select()
+        .from(stationLogs)
+        .where(and(
+          eq(stationLogs.workOrderId, parentId),
+          isNotNull(stationLogs.checkOutTime),
+        ))
+        .orderBy(asc(stationLogs.checkInTime))
 
       // 4. Count existing children (including cancelled) to determine suffix start
       const countResult = await tx
@@ -152,6 +163,48 @@ export class SplitService {
           .returning()
 
         childIds.push(inserted!.id)
+
+        // Inherit station_logs from parent
+        for (const log of parentLogs) {
+          if (log.status === 'split') {
+            // Was in-progress at split time → re-open as new check-in for child
+            await tx.insert(stationLogs).values({
+              workOrderId: inserted!.id,
+              stationId: log.stationId,
+              equipmentId: log.equipmentId,
+              deviceId: log.deviceId,
+              stepId: log.stepId,
+              checkInTime: log.checkInTime,
+              checkOutTime: null,
+              actualQtyIn: log.actualQtyIn,
+              actualQtyOut: null,
+              defectQty: 0,
+              status: 'in_progress',
+              previousLogId: log.previousLogId,
+            })
+          } else {
+            // completed / auto_filled → copy as-is
+            await tx.insert(stationLogs).values({
+              workOrderId: inserted!.id,
+              stationId: log.stationId,
+              equipmentId: log.equipmentId,
+              deviceId: log.deviceId,
+              stepId: log.stepId,
+              checkInTime: log.checkInTime,
+              checkOutTime: log.checkOutTime,
+              actualQtyIn: log.actualQtyIn,
+              actualQtyOut: log.actualQtyOut,
+              defectQty: log.defectQty,
+              status: log.status,
+              previousLogId: log.previousLogId,
+            })
+          }
+        }
+
+        // Set child status to in_progress if it inherited logs
+        if (parentLogs.length > 0) {
+          await tx.update(workOrders).set({ status: 'in_progress' }).where(eq(workOrders.id, inserted!.id))
+        }
 
         const qrDataUrl = await QRCode.toDataURL(orderNumber, {
           width: 300,

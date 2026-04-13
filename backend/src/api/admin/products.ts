@@ -22,11 +22,10 @@ const ProductSchema = z.object({
 
 const UpdateProductSchema = ProductSchema.partial().omit({ departmentId: true })
 
-async function assertRouteIsTemplate(routeId: string | null | undefined, next: Parameters<Parameters<typeof router.post>[1]>[2]): Promise<boolean> {
+async function assertRouteExists(routeId: string | null | undefined, next: Parameters<Parameters<typeof router.post>[1]>[2]): Promise<boolean> {
   if (!routeId) return true
-  const [route] = await db.select({ isTemplate: processRoutes.isTemplate }).from(processRoutes).where(eq(processRoutes.id, routeId)).limit(1)
+  const [route] = await db.select({ id: processRoutes.id }).from(processRoutes).where(eq(processRoutes.id, routeId)).limit(1)
   if (!route) { next(new AppError(ErrorCode.NOT_FOUND, '路由不存在', 404)); return false }
-  if (!route.isTemplate) { next(new AppError(ErrorCode.VALIDATION_ERROR, '料號只能指派模板路由')); return false }
   return true
 }
 
@@ -117,7 +116,7 @@ router.post('/', async (req, res, next) => {
     const [dept] = await db.select({ id: departments.id }).from(departments).where(eq(departments.id, parsed.data.departmentId)).limit(1)
     if (!dept) return next(new AppError(ErrorCode.NOT_FOUND, '部門不存在', 404))
 
-    if (!await assertRouteIsTemplate(parsed.data.routeId, next)) return
+    if (!await assertRouteExists(parsed.data.routeId, next)) return
 
     const [product] = await db
       .insert(products)
@@ -147,7 +146,7 @@ router.patch('/:id', async (req, res, next) => {
       return next(new AppError(ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid body'))
     }
 
-    if (!await assertRouteIsTemplate(parsed.data.routeId, next)) return
+    if (!await assertRouteExists(parsed.data.routeId, next)) return
 
     const updates: Record<string, unknown> = { updatedAt: new Date() }
     if (parsed.data.name !== undefined) updates['name'] = parsed.data.name

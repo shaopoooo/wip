@@ -6,6 +6,11 @@
 > 專案概述、Phase 規劃、部署架構、硬體建議 → 見 `README.md`
 > 功能待辦清單 → 見 `.claude/tasks.md`
 
+# 🌐 Communication Rules (溝通守則)
+- You MUST ALWAYS communicate with the user in **Traditional Chinese (繁體中文)**.
+- All explanations, summaries, and retro reports must be in Traditional Chinese.
+- Code comments, variables, and Git commit messages should remain in English, but explain their purpose in Chinese.
+
 ---
 
 ## 1. 建置與開發指令
