@@ -526,16 +526,16 @@ docker compose exec backend npm run seed
 - [x] 拆單後顯示子單列表 + 各自 QR Code
 
 #### DevOps — 上線準備
-- [ ] Nginx config（反向代理 `/api` → backend，其他 → front 靜態，gzip）
-- [ ] 備份 cron script（每日 `pg_dump` → gzip → `gsutil cp` 上傳 Cloud Storage）
-- [ ] 備份保留策略（Cloud Storage bucket lifecycle rule：保留 7 天，自動刪除舊檔）
-- [ ] 首次部署：手動建立 GCS bucket 並設定 lifecycle 規則
-- [ ] 部署腳本（`docker compose pull && up -d`）
-- [ ] 環境變數清單確認（`.env.example` 完整）
-- [ ] GCP VM 建立（e2-small, asia-east1）
-- [ ] Let's Encrypt SSL（certbot）
-- [ ] 防火牆規則（80, 443）
-- [ ] DNS 設定（`wip.yourfactory.com`）
+- [x] Nginx config（反向代理 `/api` → backend，其他 → front 靜態，gzip）→ `nginx/nginx.conf`
+- [x] 備份 cron script（每日 `pg_dump` → gzip → `gsutil cp` 上傳 Cloud Storage）→ `scripts/backup.sh`
+- [x] 備份保留策略（Cloud Storage bucket lifecycle rule：保留 7 天，自動刪除舊檔）→ `scripts/DEPLOY_GUIDE.md` §8
+- [x] 首次部署：手動建立 GCS bucket 並設定 lifecycle 規則 → `scripts/DEPLOY_GUIDE.md` §8
+- [x] 部署腳本（git pull → backup → build → up → health check）→ `scripts/deploy.sh`
+- [x] 環境變數清單確認（`.env.example` 完整）
+- [x] GCP VM 建立（e2-small, asia-east1）→ `scripts/DEPLOY_GUIDE.md` §1
+- [x] Let's Encrypt SSL（certbot）→ `nginx/nginx.ssl.conf` + `docker-compose.prod.yml` certbot service
+- [x] 防火牆規則（80, 443）→ `scripts/DEPLOY_GUIDE.md` §2
+- [x] DNS 設定（`wip.yourfactory.com`）→ `scripts/DEPLOY_GUIDE.md` §3
 
 ---
 
