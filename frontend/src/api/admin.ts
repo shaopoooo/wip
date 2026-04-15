@@ -356,7 +356,7 @@ export const workOrdersApi = {
     note?: string | null
   }) => post<WorkOrder>('/work-orders', data),
   update: (id: string, data: Partial<{
-    orderQty: number; plannedQty: number; priority: string
+    orderNumber: string; orderQty: number; plannedQty: number; priority: string
     dueDate: string | null; note: string | null; productId: string
   }>) => patch<WorkOrder>(`/work-orders/${id}`, data),
   updateStatus: (id: string, status: string) => patch<WorkOrder>(`/work-orders/${id}/status`, { status }),

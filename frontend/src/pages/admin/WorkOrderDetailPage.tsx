@@ -34,6 +34,7 @@ export function WorkOrderDetailPage() {
   const [statusChanging, setStatusChanging] = useState(false)
   const [splitOpen, setSplitOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const printRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -275,15 +276,6 @@ export function WorkOrderDetailPage() {
                 >
                   拆單
                 </button>
-                {wo.status !== 'cancelled' && (
-                  <button
-                    onClick={() => handleStatusChange('cancelled')}
-                    disabled={statusChanging}
-                    className="border border-red-300 text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    取消工單
-                  </button>
-                )}
               </div>
             )}
           </div>
@@ -358,6 +350,60 @@ export function WorkOrderDetailPage() {
               </table>
             )}
           </div>
+
+          {/* Cancel — separated at bottom to prevent accidental clicks */}
+          {!['completed', 'split', 'cancelled'].includes(wo.status) && (
+            <div className="border border-red-200 rounded-xl p-4 bg-red-50/30">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-red-700">危險操作</p>
+                  <p className="text-xs text-red-500 mt-0.5">取消工單後無法復原，相關 QR Code 將失效</p>
+                </div>
+                <button
+                  onClick={() => setCancelConfirmOpen(true)}
+                  disabled={statusChanging}
+                  className="border border-red-300 text-red-600 hover:bg-red-100 px-4 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  取消工單
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Cancel confirmation modal */}
+          {cancelConfirmOpen && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4">
+                <h2 className="font-bold text-red-700 text-lg">確認取消工單</h2>
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm space-y-1">
+                  <p><span className="text-slate-500">工單號：</span><span className="font-mono font-semibold text-slate-800">{wo.orderNumber}</span></p>
+                  <p><span className="text-slate-500">料號：</span><span className="font-mono text-slate-800">{product.modelNumber}</span></p>
+                  <p><span className="text-slate-500">數量：</span><span className="text-slate-800">{wo.plannedQty}</span></p>
+                  {wo.dueDate && <p><span className="text-slate-500">交期：</span><span className="text-slate-800">{wo.dueDate}</span></p>}
+                  {wo.priority === 'urgent' && <p className="text-red-600 font-semibold">⚠ 此為急件工單</p>}
+                </div>
+                <p className="text-sm text-slate-600">取消後工單狀態將變為「已取消」且無法復原，確定要繼續嗎？</p>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setCancelConfirmOpen(false)}
+                    className="flex-1 border border-slate-300 text-slate-600 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-colors cursor-pointer"
+                  >
+                    返回
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setCancelConfirmOpen(false)
+                      await handleStatusChange('cancelled')
+                    }}
+                    disabled={statusChanging}
+                    className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors cursor-pointer"
+                  >
+                    {statusChanging ? '處理中...' : '確認取消'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
       </div>
     </div>
   )
@@ -384,6 +430,7 @@ function EditWorkOrderModal({ workOrder: wo, onClose, onSaved }: {
   onClose: () => void
   onSaved: () => void
 }) {
+  const [orderNumber, setOrderNumber] = useState(wo.orderNumber)
   const [orderQty, setOrderQty] = useState(wo.orderQty ?? wo.plannedQty)
   const [plannedQty, setPlannedQty] = useState(wo.plannedQty)
   const [priority, setPriority] = useState(wo.priority)
@@ -393,6 +440,10 @@ function EditWorkOrderModal({ workOrder: wo, onClose, onSaved }: {
   const [saving, setSaving] = useState(false)
 
   const handleSave = async () => {
+    if (!orderNumber.trim()) {
+      setError('工單號不可為空')
+      return
+    }
     if (orderQty < 1 || plannedQty < 1) {
       setError('數量必須大於 0')
       return
@@ -400,7 +451,8 @@ function EditWorkOrderModal({ workOrder: wo, onClose, onSaved }: {
     setSaving(true)
     setError(null)
     try {
-      await workOrdersApi.update(wo.orderNumber, {
+      await workOrdersApi.update(wo.id, {
+        orderNumber: orderNumber.trim() !== wo.orderNumber ? orderNumber.trim() : undefined,
         orderQty,
         plannedQty,
         priority,
@@ -421,6 +473,11 @@ function EditWorkOrderModal({ workOrder: wo, onClose, onSaved }: {
         <h2 className="font-bold text-slate-800 text-lg">編輯工單 {wo.orderNumber}</h2>
 
         <div className="space-y-3">
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700 block mb-1">工單號</span>
+            <input value={orderNumber} onChange={e => setOrderNumber(e.target.value)} className={`${INPUT_CLS} font-mono`} />
+          </label>
+
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className="text-sm font-medium text-slate-700 block mb-1">訂單數量</span>

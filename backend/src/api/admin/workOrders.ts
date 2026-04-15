@@ -52,12 +52,14 @@ async function generateOrderNumber(_deptCode: string): Promise<string> {
   return `${prefix}${String(seq).padStart(3, '0')}`
 }
 
-// GET /api/admin/work-orders?department_id=&status=&search=&page=&limit=
+// GET /api/admin/work-orders?department_id=&status=&search=&sort_by=&sort_dir=&page=&limit=
 router.get('/', async (req, res, next) => {
   try {
     const departmentId = req.query['department_id'] as string | undefined
     const status = req.query['status'] as string | undefined
     const search = (req.query['search'] as string | undefined)?.trim()
+    const sortBy = req.query['sort_by'] as string | undefined
+    const sortDir = req.query['sort_dir'] === 'asc' ? 'asc' : 'desc'
     const page = Math.max(1, Number(req.query['page'] ?? 1))
     const limit = Math.min(100, Math.max(1, Number(req.query['limit'] ?? 20)))
     const offset = (page - 1) * limit
@@ -77,6 +79,17 @@ router.get('/', async (req, res, next) => {
       )!)
     }
 
+    // Sortable columns whitelist
+    const sortColMap = {
+      order_number: workOrders.orderNumber,
+      order_qty: workOrders.orderQty,
+      due_date: workOrders.dueDate,
+      created_at: workOrders.createdAt,
+    } as const
+    type SortKey = keyof typeof sortColMap
+    const sortCol = (sortBy && sortBy in sortColMap) ? sortColMap[sortBy as SortKey] : workOrders.createdAt
+    const orderExpr = sortDir === 'asc' ? asc(sortCol) : desc(sortCol)
+
     const baseQuery = db
       .select({
         workOrder: workOrders,
@@ -88,7 +101,7 @@ router.get('/', async (req, res, next) => {
 
     const [rows, [totalRow]] = await Promise.all([
       baseQuery
-        .orderBy(desc(workOrders.createdAt))
+        .orderBy(orderExpr)
         .limit(limit)
         .offset(offset),
       db.select({ count: count() })
@@ -216,6 +229,7 @@ router.post('/', async (req, res, next) => {
 
 // PATCH /api/admin/work-orders/:id — edit work order fields
 const UpdateWorkOrderSchema = z.object({
+  orderNumber: z.string().min(1).max(50).optional(),
   orderQty: z.number().int().min(1).optional(),
   plannedQty: z.number().int().min(1).optional(),
   priority: z.enum(['normal', 'urgent']).optional(),
@@ -242,6 +256,7 @@ router.patch('/:id', async (req, res, next) => {
     }
 
     const updates: Record<string, unknown> = { updatedAt: new Date() }
+    if (parsed.data.orderNumber !== undefined) updates['orderNumber'] = parsed.data.orderNumber
     if (parsed.data.orderQty !== undefined) updates['orderQty'] = parsed.data.orderQty
     if (parsed.data.plannedQty !== undefined) updates['plannedQty'] = parsed.data.plannedQty
     if (parsed.data.priority !== undefined) updates['priority'] = parsed.data.priority

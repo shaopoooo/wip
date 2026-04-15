@@ -443,6 +443,7 @@ async function seed() {
         orderNumber: wo.orderNumber,
         productId: product.id,
         routeId: finalRouteId,
+        orderQty: wo.qty,
         plannedQty: wo.qty,
         status: wo.status,
         priority: wo.priority,

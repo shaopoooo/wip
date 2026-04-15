@@ -11,6 +11,7 @@ import {
   numeric,
   inet,
   unique,
+  uniqueIndex,
   check,
   index,
   foreignKey,
@@ -243,7 +244,7 @@ export const workOrders = pgTable(
     departmentId: uuid('department_id')
       .notNull()
       .references(() => departments.id),
-    orderNumber: varchar('order_number', { length: 50 }).notNull().unique(),
+    orderNumber: varchar('order_number', { length: 50 }).notNull(),
     // format: 0<民國年><mm><dd><seq> e.g. 0115012810 / 0115012810-A (child) / 0115012810-A1 (grandchild)
     productId: uuid('product_id')
       .notNull()
@@ -270,6 +271,7 @@ export const workOrders = pgTable(
     // self-referential FK via foreignKey helper (avoids TypeScript circular type issue)
     foreignKey({ columns: [t.parentWorkOrderId], foreignColumns: [t.id] }),
     index('idx_work_orders_parent').on(t.parentWorkOrderId),
+    uniqueIndex('uq_work_orders_order_product').on(t.orderNumber, t.productId),
     index('idx_work_orders_status').on(t.status),
     index('idx_work_orders_dept').on(t.departmentId),
   ],

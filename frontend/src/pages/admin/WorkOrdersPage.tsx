@@ -88,13 +88,13 @@ export function WorkOrdersPage() {
         <table className="w-full text-sm">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              <th className="text-left px-4 py-3 font-semibold text-slate-600">工單號</th>
+              <SortTh col="order_number" label="工單號" sortBy={st.sortBy} sortDir={st.sortDir} onToggle={st.toggleSort} />
               <th className="text-left px-4 py-3 font-semibold text-slate-600">製程 / 料號</th>
-              <th className="text-left px-4 py-3 font-semibold text-slate-600">訂單數量</th>
+              <SortTh col="order_qty" label="訂單數量" sortBy={st.sortBy} sortDir={st.sortDir} onToggle={st.toggleSort} />
               <th className="text-left px-4 py-3 font-semibold text-slate-600">製作數量</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">狀態</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">優先</th>
-              <th className="text-left px-4 py-3 font-semibold text-slate-600">交期</th>
+              <SortTh col="due_date" label="交期" sortBy={st.sortBy} sortDir={st.sortDir} onToggle={st.toggleSort} />
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
@@ -122,7 +122,7 @@ export function WorkOrdersPage() {
                 <td className="px-4 py-3 text-slate-500 text-xs">{wo.dueDate ?? '—'}</td>
                 <td className="px-4 py-3 text-right">
                   <button
-                    onClick={() => navigate(`/admin/work-orders/${wo.orderNumber}`)}
+                    onClick={() => navigate(`/admin/work-orders/${wo.id}`)}
                     className="text-blue-600 hover:text-blue-800 text-xs font-medium cursor-pointer"
                   >
                     詳情 / QR →
@@ -317,5 +317,20 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="text-sm font-medium text-slate-700 block mb-1">{label}</span>
       {children}
     </label>
+  )
+}
+
+function SortTh({ col, label, sortBy, sortDir, onToggle }: {
+  col: string; label: string; sortBy: string; sortDir: 'asc' | 'desc'; onToggle: (col: string) => void
+}) {
+  const active = sortBy === col
+  return (
+    <th
+      className="text-left px-4 py-3 font-semibold text-slate-600 cursor-pointer select-none hover:bg-slate-100 transition-colors"
+      onClick={() => onToggle(col)}
+    >
+      {label}
+      <span className="ml-1 text-xs">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+    </th>
   )
 }
