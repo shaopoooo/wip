@@ -445,7 +445,8 @@ work_orders (
   id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   department_id        UUID NOT NULL REFERENCES departments(id),
   order_number         VARCHAR(50) NOT NULL UNIQUE,
-  -- 編號規則：WO-A-2026-001（母單）/ WO-A-2026-001-A（子單）/ WO-A-2026-001-A1（子子單）
+  -- 編號規則：0115012810（母單）/ 0115012810-A（子單）/ 0115012810-A1（子子單）
+  -- 格式：0<民國年3位><月2位><日2位><流水號2位>，短格式可省略前綴 0 和日期如 115017
   product_id           UUID NOT NULL REFERENCES products(id),
   route_id             UUID NOT NULL REFERENCES process_routes(id),
   planned_qty          INTEGER NOT NULL,
@@ -625,9 +626,13 @@ ALTER TABLE stations ALTER COLUMN group_id SET NOT NULL;
 
 ### 編號規則
 ```
-母單：WO-A-2026-001
-子單：WO-A-2026-001-A / -B / -C
-子子單：WO-A-2026-001-A1 / -A2
+格式：<民國年><mm><dd><流水號>
+  長格式：0<民國年3位><月2位><日2位><流水號2位>  例 0115012810
+  短格式：<民國年3位><流水號3位>                   例 115017
+母單：0115012810
+子單：0115012810-A / -B / -C
+子子單：0115012810-A1 / -A2
+同訂單多批：0115012905-1 / -2 / -3
 ```
 
 ---

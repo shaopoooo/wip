@@ -520,32 +520,105 @@ async function seed() {
   }
   console.log(`[seed]   → ${linkedCount} products linked to routes`)
 
-  // ── Work Orders (from work_order_seed) ─────────────────────────────────────
+  // ── Work Orders (from 2026.04急件 + 2026當周出貨排程) ────────────────────────
   console.log('[seed] Creating work orders...')
-  const woRows = readSeed('work_order_seed.csv')
 
-  // Assign order numbers sequentially
-  let woCounter = 0
-  const year = new Date().getFullYear()
+  // Real work order data extracted from:
+  //   ref/2026.04急件.xls — urgent parts for April 2026
+  //   ref/2026當周出貨排程.xls — shipping schedule (2026.3 sheet + 未出貨 + 4月)
+  // Work order data with real order numbers from 出貨排程
+  // Order number format: <民國年><mm><dd><流水號> e.g. 0115011202
+  //   Same order number + suffix (-1, -2) = different batches under same purchase order
+  const WORK_ORDER_DATA: { orderNumber: string; partNumber: string; qty: number; dueDate: string | null; status: string; priority: string; note: string }[] = [
+    // ── 急件 (urgent) — from ref/2026.04急件.xls ──────────────────────────────
+    { orderNumber: '0114121001-1', partNumber: 'YB267A010D', qty: 3000, dueDate: '2026-03-20', status: 'in_progress', priority: 'urgent', note: '割半斷' },
+    { orderNumber: '0114121001-2', partNumber: 'YB267A010D', qty: 1450, dueDate: '2026-03-18', status: 'in_progress', priority: 'urgent', note: '功能測' },
+    { orderNumber: '0114121701',   partNumber: 'YB267A010D', qty: 4000, dueDate: null, status: 'pending', priority: 'urgent', note: '暫停在刀模' },
+    { orderNumber: '0115012702-2', partNumber: 'YB161A025A', qty: 1000, dueDate: '2026-03-19', status: 'in_progress', priority: 'urgent', note: '加工小片' },
+    { orderNumber: '0115020902-1', partNumber: 'YB161A025A', qty: 2250, dueDate: '2026-04-02', status: 'pending', priority: 'urgent', note: '' },
+    { orderNumber: '0115030902-2', partNumber: 'YB161A025A', qty: 1000, dueDate: '2026-04-14', status: 'pending', priority: 'urgent', note: '' },
+    { orderNumber: '0115021108',   partNumber: 'YB267A029A', qty: 1500, dueDate: null, status: 'in_progress', priority: 'urgent', note: 'SMT 3/19~4/9' },
+    { orderNumber: '0115041601',   partNumber: 'YB267A029A', qty: 70, dueDate: null, status: 'pending', priority: 'urgent', note: '待後續訂單' },
+    { orderNumber: '115002-1',     partNumber: 'SB276A015A', qty: 300, dueDate: '2026-03-16', status: 'in_progress', priority: 'urgent', note: '貼膠帶' },
+    { orderNumber: '115002-2',     partNumber: 'SB276A015A', qty: 700, dueDate: '2026-03-20', status: 'in_progress', priority: 'urgent', note: '貼膠帶' },
+    { orderNumber: '115002-3',     partNumber: 'SB276A015A', qty: 1400, dueDate: '2026-03-24', status: 'in_progress', priority: 'urgent', note: '貼膠帶' },
+    { orderNumber: '115003-1',     partNumber: 'SB276A016A', qty: 300, dueDate: '2026-03-16', status: 'in_progress', priority: 'urgent', note: '貼膠帶' },
+    { orderNumber: '115003-2',     partNumber: 'SB276A016A', qty: 700, dueDate: '2026-03-20', status: 'in_progress', priority: 'urgent', note: '貼膠帶' },
+    { orderNumber: '115003-3',     partNumber: 'SB276A016A', qty: 1400, dueDate: '2026-03-24', status: 'in_progress', priority: 'urgent', note: '貼膠帶' },
+    { orderNumber: '115017-1',     partNumber: 'SB276A017A', qty: 170, dueDate: '2026-03-16', status: 'in_progress', priority: 'urgent', note: '倉庫' },
+    { orderNumber: '115017-2',     partNumber: 'SB276A017A', qty: 2070, dueDate: null, status: 'in_progress', priority: 'urgent', note: 'SMT 3/17~3/24' },
+    { orderNumber: '115017-3',     partNumber: 'SB276A017A', qty: 300, dueDate: '2026-03-18', status: 'pending', priority: 'urgent', note: '' },
+    { orderNumber: '0115021203',   partNumber: 'YA276A001A', qty: 2500, dueDate: '2026-03-23', status: 'in_progress', priority: 'urgent', note: '文字' },
+    { orderNumber: '0115041602',   partNumber: 'YA177A007A', qty: 1000, dueDate: '2026-04-07', status: 'completed', priority: 'urgent', note: '已出貨' },
+    { orderNumber: '0115041603',   partNumber: 'YB267A029A', qty: 600, dueDate: '2026-04-10', status: 'in_progress', priority: 'urgent', note: '撕銀箔' },
+    // ── 2026.3 出貨排程 — 已完成 ──────────────────────────────────────────────
+    { orderNumber: '0115012810',   partNumber: 'YB267A004A', qty: 3000, dueDate: '2026-03-03', status: 'completed', priority: 'normal', note: '成檢' },
+    { orderNumber: '0114122606',   partNumber: 'YC161A026B', qty: 2000, dueDate: '2026-03-06', status: 'completed', priority: 'normal', note: '包裝' },
+    { orderNumber: '0115012702-1', partNumber: 'YA161A001C', qty: 5000, dueDate: '2026-03-06', status: 'completed', priority: 'normal', note: '成檢' },
+    { orderNumber: '0114102204',   partNumber: 'YB280A007A', qty: 4600, dueDate: '2026-03-06', status: 'completed', priority: 'normal', note: '包裝' },
+    { orderNumber: '0114121702',   partNumber: 'YB280A005A', qty: 3019, dueDate: '2026-03-06', status: 'completed', priority: 'normal', note: '成檢' },
+    { orderNumber: '0114121001-3', partNumber: 'YB267A010D', qty: 2550, dueDate: '2026-03-09', status: 'completed', priority: 'normal', note: '包裝' },
+    { orderNumber: '0115011904-4', partNumber: 'YB267A014A', qty: 1400, dueDate: '2026-03-10', status: 'completed', priority: 'normal', note: '包裝' },
+    { orderNumber: '0115011904-3', partNumber: 'YB267A015A', qty: 1000, dueDate: '2026-03-10', status: 'completed', priority: 'normal', note: '成檢' },
+    { orderNumber: '115011',       partNumber: 'SA177A008A', qty: 500, dueDate: '2026-03-09', status: 'completed', priority: 'normal', note: '包裝' },
+    { orderNumber: '115012',       partNumber: 'SA177A008B', qty: 500, dueDate: '2026-03-09', status: 'completed', priority: 'normal', note: '包裝' },
+    { orderNumber: '0115011204',   partNumber: 'SB267A021A', qty: 200, dueDate: '2026-03-10', status: 'completed', priority: 'normal', note: '成檢' },
+    { orderNumber: '0115011904-1', partNumber: 'YB267A019A', qty: 800, dueDate: '2026-03-12', status: 'completed', priority: 'normal', note: '成檢' },
+    { orderNumber: '0115011904-5', partNumber: 'YB267A015A', qty: 965, dueDate: '2026-03-12', status: 'completed', priority: 'normal', note: '成檢' },
+    // ── 2026.3 出貨排程 — 進行中 ──────────────────────────────────────────────
+    { orderNumber: '115015',       partNumber: 'SC280A005A', qty: 800, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '倉庫' },
+    { orderNumber: '0115011205',   partNumber: 'YC280A004A', qty: 3696, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '倉庫' },
+    { orderNumber: '0115012905-1', partNumber: 'YR280A001A', qty: 2545, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '倉庫' },
+    { orderNumber: '115016',       partNumber: 'SB276A018A', qty: 170, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '倉庫' },
+    { orderNumber: '115001',       partNumber: 'SD275A006A', qty: 100, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '成檢' },
+    { orderNumber: '0115030201-1', partNumber: 'YA283A001A', qty: 1000, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '包裝' },
+    { orderNumber: '0115030201-2', partNumber: 'YA283A002A', qty: 1300, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '包裝' },
+    { orderNumber: '0115030201-3', partNumber: 'YA283A003A', qty: 500, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '成檢' },
+    { orderNumber: '0115012202',   partNumber: 'YR237A001A', qty: 5004, dueDate: '2026-03-17', status: 'in_progress', priority: 'normal', note: '測試' },
+    { orderNumber: '115013',       partNumber: 'SB165A012C', qty: 110, dueDate: '2026-03-18', status: 'in_progress', priority: 'normal', note: '加工小片' },
+    { orderNumber: '115018',       partNumber: 'SB267A019A', qty: 3000, dueDate: '2026-03-19', status: 'in_progress', priority: 'normal', note: '譽景泰外發' },
+    { orderNumber: '115020',       partNumber: 'SB267A033A', qty: 1000, dueDate: '2026-03-19', status: 'in_progress', priority: 'normal', note: '譽景泰外發' },
+    { orderNumber: '0114121214',   partNumber: 'YC280A002A', qty: 2500, dueDate: '2026-03-20', status: 'in_progress', priority: 'normal', note: '刀模' },
+    { orderNumber: '0114121201-04',partNumber: 'YD082A009A', qty: 100, dueDate: '2026-03-20', status: 'in_progress', priority: 'normal', note: '線路' },
+    { orderNumber: '0114120903',   partNumber: 'SB267A009A', qty: 15, dueDate: '2026-03-20', status: 'in_progress', priority: 'normal', note: '盲修' },
+    { orderNumber: '0115020302',   partNumber: 'YB237A002A', qty: 920, dueDate: '2026-03-23', status: 'in_progress', priority: 'normal', note: '假貼補強' },
+    { orderNumber: '0114100904',   partNumber: 'YB267A013A', qty: 1000, dueDate: '2026-03-26', status: 'in_progress', priority: 'normal', note: '包裝' },
+    { orderNumber: '0115020902-2', partNumber: 'YC161A026B', qty: 2000, dueDate: '2026-03-27', status: 'in_progress', priority: 'normal', note: '譽景泰外發' },
+    { orderNumber: '0115012704',   partNumber: 'YB267A003B', qty: 2000, dueDate: '2026-03-31', status: 'in_progress', priority: 'normal', note: '檢大張' },
+    { orderNumber: '0115012001-1', partNumber: 'YD267A026A', qty: 1470, dueDate: null, status: 'in_progress', priority: 'normal', note: '檢大張' },
+    { orderNumber: '0115012001-2', partNumber: 'YD267A026A', qty: 400, dueDate: null, status: 'in_progress', priority: 'normal', note: '刀模' },
+    { orderNumber: '0115012812',   partNumber: 'YA220X001A', qty: 4000, dueDate: '2026-04-06', status: 'in_progress', priority: 'normal', note: '鑽孔' },
+    { orderNumber: '0115022301-1', partNumber: 'YR237A001A', qty: 5004, dueDate: '2026-04-10', status: 'in_progress', priority: 'normal', note: '棕化' },
+    { orderNumber: '0115020301-1', partNumber: 'YB267A018A', qty: 600, dueDate: '2026-03-10', status: 'in_progress', priority: 'normal', note: '包裝' },
+    { orderNumber: '0115020301-2', partNumber: 'YB267A017A', qty: 600, dueDate: '2026-03-10', status: 'in_progress', priority: 'normal', note: 'OQC' },
+    // ── 待出貨 / 遠期 ────────────────────────────────────────────────────────
+    { orderNumber: '0115012905-2', partNumber: 'YR280A001A', qty: 2455, dueDate: '2026-04-21', status: 'pending', priority: 'normal', note: '待硬板製作' },
+    { orderNumber: '0115012905-3', partNumber: 'YR280A001A', qty: 5000, dueDate: '2026-05-04', status: 'pending', priority: 'normal', note: '待硬板製作' },
+    { orderNumber: '0115030902-1', partNumber: 'YA161A016B', qty: 2000, dueDate: '2026-05-11', status: 'pending', priority: 'normal', note: '' },
+    { orderNumber: '0115022301-2', partNumber: 'YR237A001A', qty: 6201, dueDate: '2026-06-10', status: 'in_progress', priority: 'normal', note: '棕化' },
+    { orderNumber: '0115030204',   partNumber: 'YB196A011A', qty: 3000, dueDate: null, status: 'pending', priority: 'normal', note: '譽景泰外發' },
+    { orderNumber: '0115041604',   partNumber: 'SC196A105A', qty: 3000, dueDate: null, status: 'pending', priority: 'normal', note: '譽景泰外發' },
+    { orderNumber: '0115041605',   partNumber: 'YB196A005B', qty: 35, dueDate: null, status: 'pending', priority: 'normal', note: '待SMT' },
+    { orderNumber: '0115041606',   partNumber: 'YA283P001A', qty: 3883, dueDate: null, status: 'pending', priority: 'normal', note: 'CNC-客戶暫停' },
+    { orderNumber: '0115041607',   partNumber: 'YA283P002A', qty: 4395, dueDate: null, status: 'pending', priority: 'normal', note: 'CNC-客戶暫停' },
+    { orderNumber: '0115041608',   partNumber: 'YA283P003A', qty: 3383, dueDate: null, status: 'pending', priority: 'normal', note: 'CNC-客戶暫停' },
+    { orderNumber: '115019',       partNumber: 'SB185A025A', qty: 150, dueDate: null, status: 'in_progress', priority: 'normal', note: '檢大張' },
+  ]
+
   let woCreated = 0
 
-  for (const r of woRows) {
-    const partNumber = r['part_number']!
-    const product = productMap.get(partNumber)
+  for (const wo of WORK_ORDER_DATA) {
+    const product = productMap.get(wo.partNumber)
     if (!product) {
-      console.warn(`[seed]   ⚠ Product not found for WO: ${partNumber}`)
+      console.warn(`[seed]   ⚠ Product not found for WO: ${wo.partNumber}`)
       continue
     }
 
-    woCounter++
-    const seqNum = String(woCounter).padStart(3, '0')
-    const orderNumber = `WO-MAIN-${year}-${seqNum}`
-
     // Find a matching route for this product (exact match, then composite)
-    let finalRouteId = routeIdMap.get(partNumber)
+    let finalRouteId = routeIdMap.get(wo.partNumber)
     if (!finalRouteId) {
       for (const [tid, rid] of routeIdMap) {
-        if (tid.includes(partNumber) || partNumber.includes(tid)) {
+        if (tid.includes(wo.partNumber) || wo.partNumber.includes(tid)) {
           finalRouteId = rid
           break
         }
@@ -553,40 +626,33 @@ async function seed() {
     }
 
     if (!finalRouteId) {
-      console.warn(`[seed]   ⚠ No route for WO: ${partNumber}, skipping`)
+      // Use product.routeId as fallback
+      finalRouteId = product.routeId ?? undefined
+    }
+
+    if (!finalRouteId) {
+      console.warn(`[seed]   ⚠ No route for WO: ${wo.partNumber}, skipping`)
       continue
     }
 
-    // Map status
-    const statusGuess = r['current_status_guess'] ?? 'in_progress'
-    let status = 'pending'
-    if (statusGuess === 'shipped') status = 'completed'
-    else if (statusGuess === 'in_progress') status = 'in_progress'
-    else if (statusGuess === 'warehouse') status = 'in_progress'
-    else if (statusGuess === 'outsourced') status = 'in_progress'
-    else if (statusGuess === 'rework') status = 'in_progress'
-    else if (statusGuess === 'customer_hold') status = 'pending'
-
-    const qty = parseInt(r['order_qty'] ?? '0', 10)
-    if (qty <= 0) continue
-
-    // await db
-    //   .insert(workOrders)
-    //   .values({
-    //     departmentId: product.departmentId,
-    //     orderNumber,
-    //     productId: product.id,
-    //     routeId: finalRouteId,
-    //     plannedQty: qty,
-    //     status,
-    //     priority: 'normal',
-    //     dueDate: r['promised_due_date'] || null,
-    //   })
-    //   .onConflictDoNothing()
+    await db
+      .insert(workOrders)
+      .values({
+        departmentId: product.departmentId,
+        orderNumber: wo.orderNumber,
+        productId: product.id,
+        routeId: finalRouteId,
+        plannedQty: wo.qty,
+        status: wo.status,
+        priority: wo.priority,
+        dueDate: wo.dueDate,
+        note: wo.note || null,
+      })
+      .onConflictDoNothing()
 
     woCreated++
   }
-  console.log(`[seed]   → ${woCreated} work orders`)
+  console.log(`[seed]   → ${woCreated} work orders (${WORK_ORDER_DATA.filter(w => w.priority === 'urgent').length} urgent)`)
 
   console.log('[seed] Done ✓')
   process.exit(0)

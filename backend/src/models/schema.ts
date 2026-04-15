@@ -244,7 +244,7 @@ export const workOrders = pgTable(
       .notNull()
       .references(() => departments.id),
     orderNumber: varchar('order_number', { length: 50 }).notNull().unique(),
-    // format: WO-A-2026-001 (parent) / WO-A-2026-001-A (child) / WO-A-2026-001-A1 (grandchild)
+    // format: 0<民國年><mm><dd><seq> e.g. 0115012810 / 0115012810-A (child) / 0115012810-A1 (grandchild)
     productId: uuid('product_id')
       .notNull()
       .references(() => products.id),

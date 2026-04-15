@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { and, asc, desc, eq, like, SQL } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, like, or, SQL } from 'drizzle-orm'
 import { z } from 'zod'
 import QRCode from 'qrcode'
 import { db } from '../../models/db'
@@ -52,11 +52,12 @@ async function generateOrderNumber(_deptCode: string): Promise<string> {
   return `${prefix}${String(seq).padStart(3, '0')}`
 }
 
-// GET /api/admin/work-orders?department_id=&status=&page=&limit=
+// GET /api/admin/work-orders?department_id=&status=&search=&page=&limit=
 router.get('/', async (req, res, next) => {
   try {
     const departmentId = req.query['department_id'] as string | undefined
     const status = req.query['status'] as string | undefined
+    const search = (req.query['search'] as string | undefined)?.trim()
     const page = Math.max(1, Number(req.query['page'] ?? 1))
     const limit = Math.min(100, Math.max(1, Number(req.query['limit'] ?? 20)))
     const offset = (page - 1) * limit
@@ -67,8 +68,16 @@ router.get('/', async (req, res, next) => {
 
     const conditions: SQL[] = [eq(workOrders.departmentId, departmentId)]
     if (status) conditions.push(eq(workOrders.status, status))
+    if (search) {
+      const pattern = `%${search}%`
+      conditions.push(or(
+        ilike(workOrders.orderNumber, pattern),
+        ilike(products.modelNumber, pattern),
+        ilike(products.name, pattern),
+      )!)
+    }
 
-    const rows = await db
+    const baseQuery = db
       .select({
         workOrder: workOrders,
         product: { name: products.name, modelNumber: products.modelNumber },
@@ -76,11 +85,19 @@ router.get('/', async (req, res, next) => {
       .from(workOrders)
       .innerJoin(products, eq(workOrders.productId, products.id))
       .where(and(...conditions))
-      .orderBy(desc(workOrders.createdAt))
-      .limit(limit)
-      .offset(offset)
 
-    sendSuccess(res, { items: rows, page, limit })
+    const [rows, [totalRow]] = await Promise.all([
+      baseQuery
+        .orderBy(desc(workOrders.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: count() })
+        .from(workOrders)
+        .innerJoin(products, eq(workOrders.productId, products.id))
+        .where(and(...conditions)),
+    ])
+
+    sendSuccess(res, { items: rows, total: totalRow?.count ?? 0, page, limit })
   } catch (err) {
     next(err)
   }
