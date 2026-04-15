@@ -26,7 +26,6 @@ services:
       - ./backend/src:/app/src:ro # hot reload
       - ./backend/drizzle.config.ts:/app/drizzle.config.ts:ro
       - ./migrations:/migrations
-      - ./ref:/ref:ro # ref 資料供 seed 使用
     command: sh -c "npm run migrate && npm run dev"
 
   frontend:

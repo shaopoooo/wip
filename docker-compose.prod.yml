@@ -17,8 +17,6 @@ services:
     environment:
       NODE_ENV: production
     restart: unless-stopped
-    volumes:
-      - /ref:/ref:ro
 
   nginx:
     build:

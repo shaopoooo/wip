@@ -11,6 +11,9 @@ npm-debug.log*
 backend/dist/
 frontend/dist/
 
+# Seed data — 含工廠真實資料，不可 commit（部署時由 ref/ 產生）
+backend/src/seed-data/
+
 # TypeScript
 *.tsbuildinfo
 

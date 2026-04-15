@@ -1,6 +1,6 @@
 /**
  * Seed script — Phase 1 初始資料（冪等，可重複執行）
- * 使用 ref/ 目錄下的真實工廠資料
+ * 資料來源：src/seed-data/*.json（由 ref/ 預先轉換）
  * 執行方式：npm run seed
  */
 
@@ -15,7 +15,7 @@ import {
   productCategories,
   customers,
   vendors,
-  groups,
+
   stations,
   equipment,
   devices,
@@ -27,99 +27,25 @@ import {
   adminUsers,
 } from './models/schema'
 
-// ── CSV parser (simple, no external dependency) ──────────────────────────────
+// ── JSON loader ─────────────────────────────────────────────────────────────
 
-function parseCsv(filePath: string): Record<string, string>[] {
-  const raw = fs.readFileSync(filePath, 'utf-8')
-  // Handle BOM
-  const content = raw.replace(/^\uFEFF/, '')
-  const lines = content.split('\n').filter((l) => l.trim().length > 0)
-  if (lines.length < 2) return []
+const SEED_DIR = path.resolve(__dirname, '../src/seed-data')
+// Fallback for compiled dist/ output where __dirname = backend/dist
+const SEED_DIR_ALT = path.resolve(__dirname, '../seed-data')
 
-  const headers = parseCsvLine(lines[0]!)
-  const rows: Record<string, string>[] = []
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCsvLine(lines[i]!)
-    const row: Record<string, string> = {}
-    for (let j = 0; j < headers.length; j++) {
-      row[headers[j]!] = values[j] ?? ''
-    }
-    rows.push(row)
-  }
-  return rows
+function loadJson<T>(filename: string): T {
+  const primary = path.join(SEED_DIR, filename)
+  const fallback = path.join(SEED_DIR_ALT, filename)
+  const filePath = fs.existsSync(primary) ? primary : fallback
+  return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as T
 }
 
-function parseCsvLine(line: string): string[] {
-  const result: string[] = []
-  let current = ''
-  let inQuotes = false
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i]!
-    if (inQuotes) {
-      if (char === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"'
-          i++
-        } else {
-          inQuotes = false
-        }
-      } else {
-        current += char
-      }
-    } else {
-      if (char === '"') {
-        inQuotes = true
-      } else if (char === ',') {
-        result.push(current.trim())
-        current = ''
-      } else {
-        current += char
-      }
-    }
-  }
-  result.push(current.trim())
-  return result
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-// Docker: /ref (mounted volume), Local: ../../ref
-const REF_DIR_DOCKER = '/ref/10_資料表'
-const REF_DIR_LOCAL = path.resolve(__dirname, '../../ref/10_資料表')
-const REF_DIR = fs.existsSync(REF_DIR_DOCKER) ? REF_DIR_DOCKER : REF_DIR_LOCAL
-
-function readSeed(filename: string): Record<string, string>[] {
-  return parseCsv(path.join(REF_DIR, '00_seed', filename))
-}
-
-function readCanonical(filename: string): Record<string, string>[] {
-  return parseCsv(path.join(REF_DIR, '01_canonical', filename))
-}
-
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 /** S* prefix → 軟板 category code, Y* → 軟硬結合板 category code */
 function prefixToCategoryCode(prefixCode: string): string {
   return prefixCode.startsWith('Y') ? 'RFB' : 'FPC'
 }
-
-// ── Stage definitions (production flow order) ────────────────────────────────
-
-const STAGE_DEFS: { name: string; code: string; stage: string; sortOrder: number }[] = [
-  { name: '前段加工組', code: 'PRE', stage: '前段加工', sortOrder: 1 },
-  { name: '鑽孔組', code: 'DRL', stage: '鑽孔/孔加工', sortOrder: 2 },
-  { name: '鍍銅組', code: 'PTH', stage: '鍍銅/PTH', sortOrder: 3 },
-  { name: '線路組', code: 'CIR', stage: '線路', sortOrder: 4 },
-  { name: '貼合壓合組', code: 'LAM', stage: '貼合/壓合', sortOrder: 5 },
-  { name: '防焊表處組', code: 'SRF', stage: '防焊/表面處理', sortOrder: 6 },
-  { name: '文字印刷組', code: 'PRT', stage: '文字/印刷', sortOrder: 7 },
-  { name: '成型加工組', code: 'FRM', stage: '成型加工', sortOrder: 8 },
-  { name: '檢驗測試組', code: 'QC', stage: '檢驗/測試', sortOrder: 9 },
-  { name: '後加工組', code: 'POST', stage: '後加工', sortOrder: 10 },
-  { name: '倉庫出貨組', code: 'WH', stage: '倉庫/待出貨', sortOrder: 11 },
-  { name: '未分類', code: 'OTH', stage: '未分類', sortOrder: 12 },
-]
 
 async function seed() {
   console.log('[seed] Starting...')
@@ -171,7 +97,7 @@ async function seed() {
 
   // ── Customers ──────────────────────────────────────────────────────────────
   console.log('[seed] Creating customers...')
-  const customerRows = readSeed('customer_master_seed.csv')
+  const customerRows = loadJson<Record<string, string>[]>('customers.json')
   if (customerRows.length > 0) {
     await db
       .insert(customers)
@@ -188,7 +114,7 @@ async function seed() {
 
   // ── Vendors ────────────────────────────────────────────────────────────────
   console.log('[seed] Creating vendors...')
-  const vendorRows = readSeed('vendor_master_candidate.csv')
+  const vendorRows = loadJson<Record<string, string>[]>('vendors.json')
   if (vendorRows.length > 0) {
     await db
       .insert(vendors)
@@ -207,59 +133,24 @@ async function seed() {
   }
   console.log(`[seed]   → ${vendorRows.length} vendors`)
 
-  // ── Groups (by stage) ─────────────────────────────────────────────────────
-  console.log('[seed] Creating groups...')
-  await db
-    .insert(groups)
-    .values(
-      STAGE_DEFS.map((s) => ({
-        departmentId: deptMain.id,
-        name: s.name,
-        code: s.code,
-        stage: s.stage,
-        description: `製程階段：${s.stage}`,
-        sortOrder: s.sortOrder,
-      })),
-    )
-    .onConflictDoNothing()
-
-  const allGroups = await db.select().from(groups)
-
-  /** Find group by department and stage */
-  function findGroup(deptId: string, stage: string) {
-    return allGroups.find((g) => g.departmentId === deptId && g.stage === stage)
-  }
-
-  // ── Stations (from process_dictionary_seed) ────────────────────────────────
+  // ── Stations (from processes.json) ─────────────────────────────────────────
   console.log('[seed] Creating stations...')
-  const processDictRows = readSeed('process_dictionary_seed.csv')
+  const processDictRows = loadJson<Record<string, string>[]>('processes.json')
 
-  // Sort by observed_count descending for sort_order within each stage
-  const stageCounters: Record<string, number> = {}
-
-  const stationValues = processDictRows.map((r) => {
-    const stage = r['normalized_stage_guess'] ?? '未分類'
-    const group = findGroup(deptMain.id, stage)
-    const stageKey = stage
-    stageCounters[stageKey] = (stageCounters[stageKey] ?? 0) + 1
-
-    return {
-      departmentId: deptMain.id,
-      groupId: group?.id ?? null,
-      name: r['raw_process_name']!,
-      code: null as string | null,
-      description: `${r['process_category_guess'] ?? 'operation'}` +
-        (r['default_vendor_guess'] ? `（常見委外：${r['default_vendor_guess']}）` : ''),
-      sortOrder: stageCounters[stageKey]!,
-    }
-  })
+  const stationValues = processDictRows.map((r, i) => ({
+    departmentId: deptMain.id,
+    name: r['raw_process_name']!,
+    code: null as string | null,
+    description: `${r['process_category_guess'] ?? 'operation'}` +
+      (r['default_vendor_guess'] ? `（常見委外：${r['default_vendor_guess']}）` : ''),
+    sortOrder: i + 1,
+  }))
 
   await db.insert(stations).values(stationValues).onConflictDoNothing()
   console.log(`[seed]   → ${processDictRows.length} stations`)
 
   const allStations = await db.select().from(stations)
 
-  /** Find station by process name */
   function findStation(_deptId: string, processName: string) {
     return allStations.find((s) => s.name === processName)
   }
@@ -269,8 +160,7 @@ async function seed() {
   const existingEquipment = await db.select({ stationId: equipment.stationId }).from(equipment)
   const equippedStationIds = new Set(existingEquipment.map((e) => e.stationId))
 
-  // Use station_capacity_dictionary for equipment names where available
-  const capacityRows = readCanonical('station_capacity_dictionary.csv')
+  const capacityRows = loadJson<Record<string, string>[]>('capacities.json')
   const capacityMap = new Map<string, string>()
   for (const r of capacityRows) {
     const equipName = r['primary_equipment_name']
@@ -342,7 +232,6 @@ async function seed() {
   ]
 
   for (const tpl of TEMPLATES) {
-    // Upsert route (by name — idempotent)
     const existing = await db
       .select({ id: processRoutes.id })
       .from(processRoutes)
@@ -368,7 +257,6 @@ async function seed() {
       templateRouteId = created!.id
     }
 
-    // Skip if steps already seeded
     const existingSteps = await db
       .select({ id: processSteps.id })
       .from(processSteps)
@@ -394,11 +282,10 @@ async function seed() {
     }
   }
 
-  // ── Products (from part_master_seed) ───────────────────────────────────────
+  // ── Products (from parts.json) ─────────────────────────────────────────────
   console.log('[seed] Creating products...')
-  const partRows = readSeed('part_master_seed.csv')
+  const partRows = loadJson<Record<string, string>[]>('parts.json')
 
-  // Filter out composite part numbers (containing 、 or &) — they are route aliases, not real products
   const realParts = partRows.filter(
     (r) => !r['part_number']!.includes('、') && !r['part_number']!.includes('&'),
   )
@@ -426,11 +313,10 @@ async function seed() {
     productMap.set(p.modelNumber, p)
   }
 
-  // ── Process Routes (from route_template_seed) ──────────────────────────────
+  // ── Process Routes (from routes.json) ──────────────────────────────────────
   console.log('[seed] Creating process routes...')
-  const routeTemplateRows = readSeed('route_template_seed.csv')
+  const routeTemplateRows = loadJson<Record<string, string>[]>('routes.json')
 
-  // Group by route_template_id
   const routeGroups = new Map<string, typeof routeTemplateRows>()
   for (const r of routeTemplateRows) {
     const templateId = r['route_template_id']!
@@ -438,7 +324,7 @@ async function seed() {
     routeGroups.get(templateId)!.push(r)
   }
 
-  const routeIdMap = new Map<string, string>() // route_template_id → UUID
+  const routeIdMap = new Map<string, string>()
 
   for (const [templateId, steps] of routeGroups) {
     const [route] = await db
@@ -457,7 +343,6 @@ async function seed() {
     }
   }
 
-  // Re-query to get all routes (in case some were already created)
   const allRoutes = await db.select().from(processRoutes)
   for (const r of allRoutes) {
     if (!routeIdMap.has(r.name)) {
@@ -510,7 +395,6 @@ async function seed() {
   console.log('[seed] Linking products to routes...')
   let linkedCount = 0
   for (const [templateId, routeId] of routeIdMap) {
-    // Skip composite template IDs (e.g. "SA177A008A、B") — no matching product
     if (templateId.includes('、') || templateId.includes('&')) continue
     await db
       .update(products)
@@ -520,101 +404,19 @@ async function seed() {
   }
   console.log(`[seed]   → ${linkedCount} products linked to routes`)
 
-  // ── Work Orders (from 2026.04急件 + 2026當周出貨排程) ────────────────────────
+  // ── Work Orders (from work-orders.json) ────────────────────────────────────
   console.log('[seed] Creating work orders...')
-
-  // Real work order data extracted from:
-  //   ref/2026.04急件.xls — urgent parts for April 2026
-  //   ref/2026當周出貨排程.xls — shipping schedule (2026.3 sheet + 未出貨 + 4月)
-  // Work order data with real order numbers from 出貨排程
-  // Order number format: <民國年><mm><dd><流水號> e.g. 0115011202
-  //   Same order number + suffix (-1, -2) = different batches under same purchase order
-  const WORK_ORDER_DATA: { orderNumber: string; partNumber: string; qty: number; dueDate: string | null; status: string; priority: string; note: string }[] = [
-    // ── 急件 (urgent) — from ref/2026.04急件.xls ──────────────────────────────
-    { orderNumber: '0114121001-1', partNumber: 'YB267A010D', qty: 3000, dueDate: '2026-03-20', status: 'in_progress', priority: 'urgent', note: '割半斷' },
-    { orderNumber: '0114121001-2', partNumber: 'YB267A010D', qty: 1450, dueDate: '2026-03-18', status: 'in_progress', priority: 'urgent', note: '功能測' },
-    { orderNumber: '0114121701',   partNumber: 'YB267A010D', qty: 4000, dueDate: null, status: 'pending', priority: 'urgent', note: '暫停在刀模' },
-    { orderNumber: '0115012702-2', partNumber: 'YB161A025A', qty: 1000, dueDate: '2026-03-19', status: 'in_progress', priority: 'urgent', note: '加工小片' },
-    { orderNumber: '0115020902-1', partNumber: 'YB161A025A', qty: 2250, dueDate: '2026-04-02', status: 'pending', priority: 'urgent', note: '' },
-    { orderNumber: '0115030902-2', partNumber: 'YB161A025A', qty: 1000, dueDate: '2026-04-14', status: 'pending', priority: 'urgent', note: '' },
-    { orderNumber: '0115021108',   partNumber: 'YB267A029A', qty: 1500, dueDate: null, status: 'in_progress', priority: 'urgent', note: 'SMT 3/19~4/9' },
-    { orderNumber: '0115041601',   partNumber: 'YB267A029A', qty: 70, dueDate: null, status: 'pending', priority: 'urgent', note: '待後續訂單' },
-    { orderNumber: '115002-1',     partNumber: 'SB276A015A', qty: 300, dueDate: '2026-03-16', status: 'in_progress', priority: 'urgent', note: '貼膠帶' },
-    { orderNumber: '115002-2',     partNumber: 'SB276A015A', qty: 700, dueDate: '2026-03-20', status: 'in_progress', priority: 'urgent', note: '貼膠帶' },
-    { orderNumber: '115002-3',     partNumber: 'SB276A015A', qty: 1400, dueDate: '2026-03-24', status: 'in_progress', priority: 'urgent', note: '貼膠帶' },
-    { orderNumber: '115003-1',     partNumber: 'SB276A016A', qty: 300, dueDate: '2026-03-16', status: 'in_progress', priority: 'urgent', note: '貼膠帶' },
-    { orderNumber: '115003-2',     partNumber: 'SB276A016A', qty: 700, dueDate: '2026-03-20', status: 'in_progress', priority: 'urgent', note: '貼膠帶' },
-    { orderNumber: '115003-3',     partNumber: 'SB276A016A', qty: 1400, dueDate: '2026-03-24', status: 'in_progress', priority: 'urgent', note: '貼膠帶' },
-    { orderNumber: '115017-1',     partNumber: 'SB276A017A', qty: 170, dueDate: '2026-03-16', status: 'in_progress', priority: 'urgent', note: '倉庫' },
-    { orderNumber: '115017-2',     partNumber: 'SB276A017A', qty: 2070, dueDate: null, status: 'in_progress', priority: 'urgent', note: 'SMT 3/17~3/24' },
-    { orderNumber: '115017-3',     partNumber: 'SB276A017A', qty: 300, dueDate: '2026-03-18', status: 'pending', priority: 'urgent', note: '' },
-    { orderNumber: '0115021203',   partNumber: 'YA276A001A', qty: 2500, dueDate: '2026-03-23', status: 'in_progress', priority: 'urgent', note: '文字' },
-    { orderNumber: '0115041602',   partNumber: 'YA177A007A', qty: 1000, dueDate: '2026-04-07', status: 'completed', priority: 'urgent', note: '已出貨' },
-    { orderNumber: '0115041603',   partNumber: 'YB267A029A', qty: 600, dueDate: '2026-04-10', status: 'in_progress', priority: 'urgent', note: '撕銀箔' },
-    // ── 2026.3 出貨排程 — 已完成 ──────────────────────────────────────────────
-    { orderNumber: '0115012810',   partNumber: 'YB267A004A', qty: 3000, dueDate: '2026-03-03', status: 'completed', priority: 'normal', note: '成檢' },
-    { orderNumber: '0114122606',   partNumber: 'YC161A026B', qty: 2000, dueDate: '2026-03-06', status: 'completed', priority: 'normal', note: '包裝' },
-    { orderNumber: '0115012702-1', partNumber: 'YA161A001C', qty: 5000, dueDate: '2026-03-06', status: 'completed', priority: 'normal', note: '成檢' },
-    { orderNumber: '0114102204',   partNumber: 'YB280A007A', qty: 4600, dueDate: '2026-03-06', status: 'completed', priority: 'normal', note: '包裝' },
-    { orderNumber: '0114121702',   partNumber: 'YB280A005A', qty: 3019, dueDate: '2026-03-06', status: 'completed', priority: 'normal', note: '成檢' },
-    { orderNumber: '0114121001-3', partNumber: 'YB267A010D', qty: 2550, dueDate: '2026-03-09', status: 'completed', priority: 'normal', note: '包裝' },
-    { orderNumber: '0115011904-4', partNumber: 'YB267A014A', qty: 1400, dueDate: '2026-03-10', status: 'completed', priority: 'normal', note: '包裝' },
-    { orderNumber: '0115011904-3', partNumber: 'YB267A015A', qty: 1000, dueDate: '2026-03-10', status: 'completed', priority: 'normal', note: '成檢' },
-    { orderNumber: '115011',       partNumber: 'SA177A008A', qty: 500, dueDate: '2026-03-09', status: 'completed', priority: 'normal', note: '包裝' },
-    { orderNumber: '115012',       partNumber: 'SA177A008B', qty: 500, dueDate: '2026-03-09', status: 'completed', priority: 'normal', note: '包裝' },
-    { orderNumber: '0115011204',   partNumber: 'SB267A021A', qty: 200, dueDate: '2026-03-10', status: 'completed', priority: 'normal', note: '成檢' },
-    { orderNumber: '0115011904-1', partNumber: 'YB267A019A', qty: 800, dueDate: '2026-03-12', status: 'completed', priority: 'normal', note: '成檢' },
-    { orderNumber: '0115011904-5', partNumber: 'YB267A015A', qty: 965, dueDate: '2026-03-12', status: 'completed', priority: 'normal', note: '成檢' },
-    // ── 2026.3 出貨排程 — 進行中 ──────────────────────────────────────────────
-    { orderNumber: '115015',       partNumber: 'SC280A005A', qty: 800, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '倉庫' },
-    { orderNumber: '0115011205',   partNumber: 'YC280A004A', qty: 3696, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '倉庫' },
-    { orderNumber: '0115012905-1', partNumber: 'YR280A001A', qty: 2545, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '倉庫' },
-    { orderNumber: '115016',       partNumber: 'SB276A018A', qty: 170, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '倉庫' },
-    { orderNumber: '115001',       partNumber: 'SD275A006A', qty: 100, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '成檢' },
-    { orderNumber: '0115030201-1', partNumber: 'YA283A001A', qty: 1000, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '包裝' },
-    { orderNumber: '0115030201-2', partNumber: 'YA283A002A', qty: 1300, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '包裝' },
-    { orderNumber: '0115030201-3', partNumber: 'YA283A003A', qty: 500, dueDate: '2026-03-16', status: 'in_progress', priority: 'normal', note: '成檢' },
-    { orderNumber: '0115012202',   partNumber: 'YR237A001A', qty: 5004, dueDate: '2026-03-17', status: 'in_progress', priority: 'normal', note: '測試' },
-    { orderNumber: '115013',       partNumber: 'SB165A012C', qty: 110, dueDate: '2026-03-18', status: 'in_progress', priority: 'normal', note: '加工小片' },
-    { orderNumber: '115018',       partNumber: 'SB267A019A', qty: 3000, dueDate: '2026-03-19', status: 'in_progress', priority: 'normal', note: '譽景泰外發' },
-    { orderNumber: '115020',       partNumber: 'SB267A033A', qty: 1000, dueDate: '2026-03-19', status: 'in_progress', priority: 'normal', note: '譽景泰外發' },
-    { orderNumber: '0114121214',   partNumber: 'YC280A002A', qty: 2500, dueDate: '2026-03-20', status: 'in_progress', priority: 'normal', note: '刀模' },
-    { orderNumber: '0114121201-04',partNumber: 'YD082A009A', qty: 100, dueDate: '2026-03-20', status: 'in_progress', priority: 'normal', note: '線路' },
-    { orderNumber: '0114120903',   partNumber: 'SB267A009A', qty: 15, dueDate: '2026-03-20', status: 'in_progress', priority: 'normal', note: '盲修' },
-    { orderNumber: '0115020302',   partNumber: 'YB237A002A', qty: 920, dueDate: '2026-03-23', status: 'in_progress', priority: 'normal', note: '假貼補強' },
-    { orderNumber: '0114100904',   partNumber: 'YB267A013A', qty: 1000, dueDate: '2026-03-26', status: 'in_progress', priority: 'normal', note: '包裝' },
-    { orderNumber: '0115020902-2', partNumber: 'YC161A026B', qty: 2000, dueDate: '2026-03-27', status: 'in_progress', priority: 'normal', note: '譽景泰外發' },
-    { orderNumber: '0115012704',   partNumber: 'YB267A003B', qty: 2000, dueDate: '2026-03-31', status: 'in_progress', priority: 'normal', note: '檢大張' },
-    { orderNumber: '0115012001-1', partNumber: 'YD267A026A', qty: 1470, dueDate: null, status: 'in_progress', priority: 'normal', note: '檢大張' },
-    { orderNumber: '0115012001-2', partNumber: 'YD267A026A', qty: 400, dueDate: null, status: 'in_progress', priority: 'normal', note: '刀模' },
-    { orderNumber: '0115012812',   partNumber: 'YA220X001A', qty: 4000, dueDate: '2026-04-06', status: 'in_progress', priority: 'normal', note: '鑽孔' },
-    { orderNumber: '0115022301-1', partNumber: 'YR237A001A', qty: 5004, dueDate: '2026-04-10', status: 'in_progress', priority: 'normal', note: '棕化' },
-    { orderNumber: '0115020301-1', partNumber: 'YB267A018A', qty: 600, dueDate: '2026-03-10', status: 'in_progress', priority: 'normal', note: '包裝' },
-    { orderNumber: '0115020301-2', partNumber: 'YB267A017A', qty: 600, dueDate: '2026-03-10', status: 'in_progress', priority: 'normal', note: 'OQC' },
-    // ── 待出貨 / 遠期 ────────────────────────────────────────────────────────
-    { orderNumber: '0115012905-2', partNumber: 'YR280A001A', qty: 2455, dueDate: '2026-04-21', status: 'pending', priority: 'normal', note: '待硬板製作' },
-    { orderNumber: '0115012905-3', partNumber: 'YR280A001A', qty: 5000, dueDate: '2026-05-04', status: 'pending', priority: 'normal', note: '待硬板製作' },
-    { orderNumber: '0115030902-1', partNumber: 'YA161A016B', qty: 2000, dueDate: '2026-05-11', status: 'pending', priority: 'normal', note: '' },
-    { orderNumber: '0115022301-2', partNumber: 'YR237A001A', qty: 6201, dueDate: '2026-06-10', status: 'in_progress', priority: 'normal', note: '棕化' },
-    { orderNumber: '0115030204',   partNumber: 'YB196A011A', qty: 3000, dueDate: null, status: 'pending', priority: 'normal', note: '譽景泰外發' },
-    { orderNumber: '0115041604',   partNumber: 'SC196A105A', qty: 3000, dueDate: null, status: 'pending', priority: 'normal', note: '譽景泰外發' },
-    { orderNumber: '0115041605',   partNumber: 'YB196A005B', qty: 35, dueDate: null, status: 'pending', priority: 'normal', note: '待SMT' },
-    { orderNumber: '0115041606',   partNumber: 'YA283P001A', qty: 3883, dueDate: null, status: 'pending', priority: 'normal', note: 'CNC-客戶暫停' },
-    { orderNumber: '0115041607',   partNumber: 'YA283P002A', qty: 4395, dueDate: null, status: 'pending', priority: 'normal', note: 'CNC-客戶暫停' },
-    { orderNumber: '0115041608',   partNumber: 'YA283P003A', qty: 3383, dueDate: null, status: 'pending', priority: 'normal', note: 'CNC-客戶暫停' },
-    { orderNumber: '115019',       partNumber: 'SB185A025A', qty: 150, dueDate: null, status: 'in_progress', priority: 'normal', note: '檢大張' },
-  ]
+  const woData = loadJson<{ orderNumber: string; partNumber: string; qty: number; dueDate: string | null; status: string; priority: string; note: string }[]>('work-orders.json')
 
   let woCreated = 0
 
-  for (const wo of WORK_ORDER_DATA) {
+  for (const wo of woData) {
     const product = productMap.get(wo.partNumber)
     if (!product) {
       console.warn(`[seed]   ⚠ Product not found for WO: ${wo.partNumber}`)
       continue
     }
 
-    // Find a matching route for this product (exact match, then composite)
     let finalRouteId = routeIdMap.get(wo.partNumber)
     if (!finalRouteId) {
       for (const [tid, rid] of routeIdMap) {
@@ -626,7 +428,6 @@ async function seed() {
     }
 
     if (!finalRouteId) {
-      // Use product.routeId as fallback
       finalRouteId = product.routeId ?? undefined
     }
 
@@ -652,7 +453,7 @@ async function seed() {
 
     woCreated++
   }
-  console.log(`[seed]   → ${woCreated} work orders (${WORK_ORDER_DATA.filter(w => w.priority === 'urgent').length} urgent)`)
+  console.log(`[seed]   → ${woCreated} work orders (${woData.filter(w => w.priority === 'urgent').length} urgent)`)
 
   console.log('[seed] Done ✓')
   process.exit(0)

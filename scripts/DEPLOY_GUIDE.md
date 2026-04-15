@@ -85,7 +85,30 @@ nano .env
 | `CORS_ORIGIN` | `https://wip.yourfactory.com` |
 | `GCS_BACKUP_BUCKET` | `gs://your-factory-wip-backup` |
 
-## 6. 首次部署（HTTP 模式）
+## 6. 上傳 Seed Data
+
+`backend/src/seed-data/` 含工廠真實資料，不在 git 中，需從本機手動上傳至 VM。
+
+```bash
+# 在本機執行（將 seed-data 上傳到 VM）
+gcloud compute scp --recurse \
+  backend/src/seed-data \
+  wip-prod:/opt/wip/backend/src/seed-data \
+  --zone=asia-east1-b
+```
+
+> 也可用 `rsync` 或 `scp`：
+> ```bash
+> scp -r backend/src/seed-data user@<VM_IP>:/opt/wip/backend/src/seed-data
+> ```
+
+上傳後在 VM 確認：
+```bash
+ls /opt/wip/backend/src/seed-data/
+# 應看到：capacities.json  customers.json  parts.json  processes.json  routes.json  vendors.json  work-orders.json
+```
+
+## 7. 首次部署（HTTP 模式）
 
 ```bash
 cd /opt/wip
@@ -104,7 +127,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backend npm
 curl http://localhost/health
 ```
 
-## 7. SSL 證書（Let's Encrypt）
+## 8. SSL 證書（Let's Encrypt）
 
 ```bash
 cd /opt/wip
@@ -134,7 +157,7 @@ curl https://wip.yourfactory.com/health
 > 0 3 * * 1 docker compose -f /opt/wip/docker-compose.yml -f /opt/wip/docker-compose.prod.yml exec nginx nginx -s reload
 > ```
 
-## 8. GCS 備份 Bucket 建立
+## 9. GCS 備份 Bucket 建立
 
 ```bash
 # 建立 bucket（asia-east1, nearline）
@@ -155,7 +178,7 @@ gsutil lifecycle set /tmp/lifecycle.json gs://your-factory-wip-backup
 (crontab -l 2>/dev/null; echo "0 2 * * * /opt/wip/scripts/backup.sh >> /var/log/wip-backup.log 2>&1") | crontab -
 ```
 
-## 9. 後續部署
+## 10. 後續部署
 
 ```bash
 cd /opt/wip
@@ -164,7 +187,7 @@ cd /opt/wip
 
 deploy.sh 會自動：git pull → 備份 DB → build → up → health check。
 
-## 10. 常用維運指令
+## 11. 常用維運指令
 
 ```bash
 COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
