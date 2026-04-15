@@ -203,9 +203,9 @@ export function RoutesPage() {
 
 const TEMPLATE_COLORS: Record<string, { bg: string; border: string; badge: string }> = {
   single_sided: { bg: 'bg-blue-50', border: 'border-blue-200', badge: 'bg-blue-100 text-blue-700' },
-  double_sided:  { bg: 'bg-emerald-50', border: 'border-emerald-200', badge: 'bg-emerald-100 text-emerald-700' },
-  multi_layer:   { bg: 'bg-violet-50', border: 'border-violet-200', badge: 'bg-violet-100 text-violet-700' },
-  rigid_flex:    { bg: 'bg-amber-50', border: 'border-amber-200', badge: 'bg-amber-100 text-amber-700' },
+  double_sided: { bg: 'bg-emerald-50', border: 'border-emerald-200', badge: 'bg-emerald-100 text-emerald-700' },
+  multi_layer: { bg: 'bg-violet-50', border: 'border-violet-200', badge: 'bg-violet-100 text-violet-700' },
+  rigid_flex: { bg: 'bg-amber-50', border: 'border-amber-200', badge: 'bg-amber-100 text-amber-700' },
 }
 
 function TemplateCard({ template, onManageSteps, onClone, onEdit, onDeactivate }: {
@@ -487,7 +487,7 @@ function StepsModal({ route, deptId, onClose }: { route: ProcessRoute; deptId: s
           <div>
             <h2 className="font-bold text-slate-800 text-lg">步驟管理 — {route.name.replace('【模板】', '')}</h2>
             {route.isTemplate && (
-              <p className="text-xs text-amber-600 font-medium mt-0.5">此為模板，修改會影響所有未來套用</p>
+              <p className="text-xs text-slate-400 font-medium mt-0.5">模板步驟僅供建立路由時參考</p>
             )}
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 cursor-pointer text-xl leading-none">×</button>

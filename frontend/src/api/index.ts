@@ -98,6 +98,7 @@ export interface WipStation {
   departmentName: string
   departmentCode: string
   wipCount: number
+  queuingCount: number
 }
 
 export interface TodayStats {
@@ -130,6 +131,7 @@ export interface WorkOrderProgress {
   currentStationName: string | null
   currentGroupName: string | null
   lastActivityAt: string | null
+  lastActivityType: 'in' | 'out' | null
 }
 
 // ── Traceability 型別 ──────────────────────────────────────────────────────────
@@ -158,8 +160,10 @@ export interface TraceWorkOrder {
   parentWorkOrderId: string | null
   isSplit: boolean
   createdAt: string
+  note: string | null
   productName: string
   modelNumber: string
+  productDescription: string | null
   departmentId: string
   departmentName: string
   departmentCode: string
@@ -208,11 +212,8 @@ export interface StationWorkOrder {
 }
 
 export const dashboardApi = {
-  wip: (params?: { departmentId?: string; mode?: 'in_station' | 'queuing' }) => {
-    const q = new URLSearchParams()
-    if (params?.departmentId) q.set('department_id', params.departmentId)
-    if (params?.mode) q.set('mode', params.mode)
-    const qs = q.size ? `?${q}` : ''
+  wip: (params?: { departmentId?: string }) => {
+    const qs = params?.departmentId ? `?department_id=${params.departmentId}` : ''
     return api.get<WipStation[]>(`/dashboard/wip${qs}`)
   },
   today: (departmentId?: string) => {

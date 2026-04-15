@@ -38,8 +38,9 @@ const router = createBrowserRouter([
     element: <ProtectedAdminLayout />,
     children: [
       { path: '/admin', element: <Navigate to="/admin/work-orders" replace /> },
+      { path: '/admin/dashboard', element: <DashboardPage /> },
       { path: '/admin/work-orders', element: <WorkOrdersPage /> },
-      { path: '/admin/work-orders/:id', element: <WorkOrderDetailPage /> },
+      { path: '/admin/work-orders/:orderNumber', element: <WorkOrderDetailPage /> },
       { path: '/admin/products', element: <ProductsPage /> },
       { path: '/admin/categories', element: <CategoriesPage /> },
       { path: '/admin/stations', element: <StationsPage /> },
@@ -58,13 +59,13 @@ const router = createBrowserRouter([
     element: <Layout />,
     errorElement: <ErrorPage />,
     children: [
-      { index: true, element: <DashboardPage /> },
+      { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: 'setup', element: <SetupPage /> },
       { path: 'scan', element: <ScanPage /> },
       { path: 'correction', element: <CorrectionPage /> },
       { path: 'dashboard', element: <DashboardPage /> },
       { path: 'trace', element: <TracePage /> },
-      { path: '*', element: <Navigate to="/" replace /> },
+      { path: '*', element: <Navigate to="/dashboard" replace /> },
     ],
   },
 ])

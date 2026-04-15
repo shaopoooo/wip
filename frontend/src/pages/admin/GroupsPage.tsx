@@ -10,6 +10,8 @@ export function GroupsPage() {
   const [isActive, setIsActive] = useState('true')
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Group | null>(null)
+  const [reordering, setReordering] = useState(false)
+  const [originalOrder, setOriginalOrder] = useState<string[]>([])  // id list in original order
 
   useEffect(() => {
     departmentsApi.list().then(d => {
@@ -27,6 +29,8 @@ export function GroupsPage() {
         isActive: isActive || undefined,
       })
       st.setData(result.items, result.total)
+      setOriginalOrder(result.items.map(g => g.id))
+      setReordering(false)
     } catch { } finally { st.setLoading(false) }
   }, [st.params, selectedDept, isActive]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -41,11 +45,36 @@ export function GroupsPage() {
     void load()
   }
 
+  const handleMove = (index: number, dir: -1 | 1) => {
+    const items = [...st.items]
+    const other = index + dir
+    if (other < 0 || other >= items.length) return
+    const tmpOrder = items[index]!.sortOrder
+    items[index] = { ...items[index]!, sortOrder: items[other]!.sortOrder }
+    items[other] = { ...items[other]!, sortOrder: tmpOrder }
+    items.sort((a, b) => a.sortOrder - b.sortOrder)
+    st.setData(items, st.total)
+    setReordering(true)
+  }
+
+  const handleSaveOrder = async () => {
+    await groupsApi.reorder(st.items.map((g, i) => ({ id: g.id, sortOrder: i })))
+    setReordering(false)
+    void load()
+  }
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold text-slate-800">組別管理</h1>
-        <button onClick={() => { setEditing(null); setShowModal(true) }} className={BTN_PRIMARY}>+ 新增組別</button>
+        <div className="flex gap-2">
+          {reordering && (
+            <button onClick={handleSaveOrder} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer">
+              儲存排序
+            </button>
+          )}
+          <button onClick={() => { setEditing(null); setShowModal(true) }} className={BTN_PRIMARY}>+ 新增組別</button>
+        </div>
       </div>
 
       <div className="flex gap-3 mb-4">
@@ -70,6 +99,7 @@ export function GroupsPage() {
         <table className="w-full text-sm">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
+              <th className="text-center px-2 py-3 font-semibold text-slate-600 w-16">排序</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">組別名稱</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">代碼</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">製程階段</th>
@@ -79,10 +109,27 @@ export function GroupsPage() {
             </tr>
           </thead>
           <tbody>
-            {st.loading && <tr><td colSpan={6} className="text-center py-10 text-slate-400">載入中...</td></tr>}
-            {!st.loading && st.items.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-400">尚無組別</td></tr>}
-            {st.items.map(item => (
-              <tr key={item.id} className={`border-b border-slate-100 hover:bg-slate-50 ${!item.isActive ? 'opacity-50' : ''}`}>
+            {st.loading && <tr><td colSpan={7} className="text-center py-10 text-slate-400">載入中...</td></tr>}
+            {!st.loading && st.items.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-slate-400">尚無組別</td></tr>}
+            {st.items.map((item, idx) => {
+              const moved = reordering && originalOrder[idx] !== item.id
+              return (
+              <tr key={item.id} className={`border-b border-slate-100 hover:bg-slate-50 ${!item.isActive ? 'opacity-50' : ''} ${moved ? 'bg-blue-50' : ''}`}>
+                <td className="px-2 py-3 text-center">
+                  <div className="flex items-center justify-center gap-0.5">
+                    <button
+                      onClick={() => handleMove(idx, -1)}
+                      disabled={idx === 0}
+                      className="text-slate-400 hover:text-slate-700 disabled:opacity-20 cursor-pointer disabled:cursor-default text-xs px-1"
+                    >▲</button>
+                    <span className="text-xs text-slate-400 w-4 text-center">{idx + 1}</span>
+                    <button
+                      onClick={() => handleMove(idx, 1)}
+                      disabled={idx === st.items.length - 1}
+                      className="text-slate-400 hover:text-slate-700 disabled:opacity-20 cursor-pointer disabled:cursor-default text-xs px-1"
+                    >▼</button>
+                  </div>
+                </td>
                 <td className="px-4 py-3 font-medium text-slate-800">{item.name}</td>
                 <td className="px-4 py-3 font-mono text-slate-600">{item.code ?? '—'}</td>
                 <td className="px-4 py-3 text-slate-600">{item.stage ?? '—'}</td>
@@ -97,7 +144,8 @@ export function GroupsPage() {
                   {item.isActive && <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:text-red-700 text-xs font-medium cursor-pointer">停用</button>}
                 </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>

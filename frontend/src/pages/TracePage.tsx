@@ -180,6 +180,22 @@ function WorkOrderHeader({ wo }: { wo: TraceWorkOrder }) {
           此工單為拆單工單
         </p>
       )}
+      {(wo.note || wo.productDescription) && (
+        <div className="mt-3 pt-3 border-t border-slate-700 space-y-2">
+          {wo.note && (
+            <div>
+              <span className="text-[10px] text-slate-500">工單備註</span>
+              <p className="text-xs text-slate-300 whitespace-pre-wrap bg-slate-900/50 rounded px-2 py-1.5 mt-0.5">{wo.note}</p>
+            </div>
+          )}
+          {wo.productDescription && (
+            <div>
+              <span className="text-[10px] text-slate-500">料號備註</span>
+              <p className="text-xs text-slate-300 whitespace-pre-wrap bg-slate-900/50 rounded px-2 py-1.5 mt-0.5">{wo.productDescription}</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -250,7 +266,7 @@ export function TracePage() {
             type="text"
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder="輸入工單號碼，例如 WO-A-2026-001"
+            placeholder="輸入工單號碼，例如 0115012810"
             className="flex-1 bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
           />
           <button

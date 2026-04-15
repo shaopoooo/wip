@@ -11,6 +11,7 @@ import {
   numeric,
   inet,
   unique,
+  uniqueIndex,
   check,
   index,
   foreignKey,
@@ -243,13 +244,12 @@ export const workOrders = pgTable(
     departmentId: uuid('department_id')
       .notNull()
       .references(() => departments.id),
-    orderNumber: varchar('order_number', { length: 50 }).notNull().unique(),
-    // format: WO-A-2026-001 (parent) / WO-A-2026-001-A (child) / WO-A-2026-001-A1 (grandchild)
+    orderNumber: varchar('order_number', { length: 50 }).notNull(),
+    // format: 0<民國年><mm><dd><seq> e.g. 0115012810 / 0115012810-A (child) / 0115012810-A1 (grandchild)
     productId: uuid('product_id')
       .notNull()
       .references(() => products.id),
     routeId: uuid('route_id')
-      .notNull()
       .references(() => processRoutes.id),
     plannedQty: integer('planned_qty').notNull(),   // 製作數量
     orderQty: integer('order_qty'),                  // 訂單需求數量
@@ -260,6 +260,7 @@ export const workOrders = pgTable(
     parentWorkOrderId: uuid('parent_work_order_id'),  // self-ref FK defined below
     splitReason: varchar('split_reason', { length: 20 }), // rush | batch_shipment
     isSplit: boolean('is_split').default(false),
+    note: text('note'),                         // 備註
     salesOrderId: uuid('sales_order_id'),    // Phase 3
     scheduledStart: timestamp('scheduled_start', { withTimezone: true }), // Phase 3
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
@@ -270,6 +271,7 @@ export const workOrders = pgTable(
     // self-referential FK via foreignKey helper (avoids TypeScript circular type issue)
     foreignKey({ columns: [t.parentWorkOrderId], foreignColumns: [t.id] }),
     index('idx_work_orders_parent').on(t.parentWorkOrderId),
+    uniqueIndex('uq_work_orders_order_product').on(t.orderNumber, t.productId),
     index('idx_work_orders_status').on(t.status),
     index('idx_work_orders_dept').on(t.departmentId),
   ],

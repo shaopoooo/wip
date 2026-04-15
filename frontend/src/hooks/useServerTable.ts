@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 
 export interface ServerTableParams {
   page: number
@@ -41,6 +41,8 @@ export function useServerTable<T>(options?: {
   const [search, setSearchState] = useState('')
   const [sortBy, setSortByState] = useState(options?.defaultSortBy ?? '')
   const [sortDir, setSortDirState] = useState<'asc' | 'desc'>(options?.defaultSortDir ?? 'asc')
+  const sortByRef = useRef(sortBy)
+  sortByRef.current = sortBy
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [items, setItemsState] = useState<T[]>([])
   const [total, setTotalState] = useState(0)
@@ -65,16 +67,13 @@ export function useServerTable<T>(options?: {
   const setSortDir = useCallback((d: 'asc' | 'desc') => { setSortDirState(d); setPageState(1) }, [])
 
   const toggleSort = useCallback((col: string) => {
-    setSortByState(prev => {
-      if (prev === col) {
-        setSortDirState(d => d === 'asc' ? 'desc' : 'asc')
-        setPageState(1)
-        return col
-      }
+    if (sortByRef.current === col) {
+      setSortDirState(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortByState(col)
       setSortDirState('asc')
-      setPageState(1)
-      return col
-    })
+    }
+    setPageState(1)
   }, [])
 
   const setData = useCallback((newItems: T[], newTotal: number) => {

@@ -232,7 +232,7 @@ docker compose exec backend npm run seed
 - 進入「工單管理」→ 點「+ 建立工單」
 - 選部門（A 線）→ 選產品（FPC 測試板）→ 選路由（測試路由 R1）
 - 填數量 50、交期今天 → 點「建立」
-- 確認工單號格式符合 `WO-A-{YEAR}-{SEQ}`（例 `WO-A-2026-003`）
+- 確認工單號格式符合 `0<民國年><mm><dd><流水號>`（例 `0115041601`）
 - 確認工單出現在列表，狀態為「待生產」
 
 **7. QR Code 預覽 + 列印**
@@ -348,7 +348,7 @@ docker compose exec backend npm run seed
 - [ ] 前端刪除/建立按鈕無 loading 防連點
 
 #### P2 — 待處理
-- [ ] 拆單 API 路徑改到 `/api/admin/work-orders/:id/split`（需 JWT 認證）
+- [x] 拆單 API 路徑改到 `/api/admin/work-orders/:id/split`（需 JWT 認證）
 - [ ] 登入端點 `POST /api/admin/auth/login` 加入 rate limiting（IP-based，建議 5 次/分鐘）
 - [ ] CLAUDE.md devices schema 同步更新（補上 `department_id`、`station_id` nullable 變更）
 
@@ -510,31 +510,32 @@ docker compose exec backend npm run seed
 > 驗收：拆單後母單 QR 失效；部署到 VM 後平板可正常存取
 
 #### Backend — 拆單 API
-- [ ] `POST /api/work-orders/:id/split`
-  - [ ] 驗數量總和 = 母單 `planned_qty`（`SPLIT_QTY_MISMATCH`）
-  - [ ] 取母單最新一筆 log 的站點作為子單起始站
-  - [ ] 建立子單（繼承產品、路由，設 `parent_work_order_id`）
-  - [ ] 母單狀態改 `split`，QR Code 立即失效
-  - [ ] 寫入 `split_logs` + `audit_logs`
-- [ ] `GET /api/work-orders/:id/split-history`
-- [ ] `GET /health`（健康檢查 endpoint）
+- [x] `POST /api/admin/work-orders/:id/split`（需 JWT，SplitService.ts）
+  - [x] 驗數量總和 = 母單 `planned_qty`（`SPLIT_QTY_MISMATCH`）
+  - [x] 有進行中 check-in 時改 status=abnormal
+  - [x] 建立子單（繼承產品、路由，設 `parent_work_order_id`）
+  - [x] 母單狀態改 `split`，QR Code 立即失效
+  - [x] 寫入 `split_logs` + `audit_logs`
+  - [x] 回傳子單列表 + 各自 QR Code（base64）
+- [x] `GET /api/admin/work-orders/:id/split-history`
+- [x] `GET /health`（已存在於 index.ts:43）
 
 #### Frontend — 拆單介面
-- [ ] 工單詳情頁加「拆單」按鈕（母單且非 split 才顯示）
-- [ ] 拆單 modal（選原因 → 輸入子單數量/交期/優先級 → 即時驗證總和）
-- [ ] 拆單後顯示子單列表 + 各自 QR Code
+- [x] 工單詳情頁加「拆單」按鈕（母單且非 split 才顯示）
+- [x] 拆單 modal（選原因 → 輸入子單數量/交期/優先級 → 即時驗證總和）
+- [x] 拆單後顯示子單列表 + 各自 QR Code
 
 #### DevOps — 上線準備
-- [ ] Nginx config（反向代理 `/api` → backend，其他 → front 靜態，gzip）
-- [ ] 備份 cron script（每日 `pg_dump` → gzip → `gsutil cp` 上傳 Cloud Storage）
-- [ ] 備份保留策略（Cloud Storage bucket lifecycle rule：保留 7 天，自動刪除舊檔）
-- [ ] 首次部署：手動建立 GCS bucket 並設定 lifecycle 規則
-- [ ] 部署腳本（`docker compose pull && up -d`）
-- [ ] 環境變數清單確認（`.env.example` 完整）
-- [ ] GCP VM 建立（e2-small, asia-east1）
-- [ ] Let's Encrypt SSL（certbot）
-- [ ] 防火牆規則（80, 443）
-- [ ] DNS 設定（`wip.yourfactory.com`）
+- [x] Nginx config（反向代理 `/api` → backend，其他 → front 靜態，gzip）→ `nginx/nginx.conf`
+- [x] 備份 cron script（每日 `pg_dump` → gzip → `gsutil cp` 上傳 Cloud Storage）→ `scripts/backup.sh`
+- [x] 備份保留策略（Cloud Storage bucket lifecycle rule：保留 7 天，自動刪除舊檔）→ `scripts/DEPLOY_GUIDE.md` §8
+- [x] 首次部署：手動建立 GCS bucket 並設定 lifecycle 規則 → `scripts/DEPLOY_GUIDE.md` §8
+- [x] 部署腳本（git pull → backup → build → up → health check）→ `scripts/deploy.sh`
+- [x] 環境變數清單確認（`.env.example` 完整）
+- [x] GCP VM 建立（e2-small, asia-east1）→ `scripts/DEPLOY_GUIDE.md` §1
+- [x] Let's Encrypt SSL（certbot）→ `nginx/nginx.ssl.conf` + `docker-compose.prod.yml` certbot service
+- [x] 防火牆規則（80, 443）→ `scripts/DEPLOY_GUIDE.md` §2
+- [x] DNS 設定（`wip.yourfactory.com`）→ `scripts/DEPLOY_GUIDE.md` §3
 
 ---
 

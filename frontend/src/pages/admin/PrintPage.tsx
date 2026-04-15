@@ -8,6 +8,7 @@ interface PrintItem {
   productName: string
   modelNumber: string
   plannedQty: number
+  orderQty: number | null
   dueDate: string | null
   priority: string
 }
@@ -57,7 +58,7 @@ export function PrintPage() {
             <p className="text-xs text-slate-600 mt-0.5">{item.productName}</p>
             <p className="text-xs text-slate-500">{item.modelNumber}</p>
             <div className="flex justify-between text-xs text-slate-500 mt-1">
-              <span>數量: {item.plannedQty}</span>
+              <span>數量: {item.orderQty ?? item.plannedQty}</span>
               {item.dueDate && <span>交期: {item.dueDate}</span>}
               {item.priority === 'urgent' && <span className="text-red-600 font-semibold">急件</span>}
             </div>

@@ -1,6 +1,6 @@
 /**
  * Seed script — Phase 1 初始資料（冪等，可重複執行）
- * 使用 ref/ 目錄下的真實工廠資料
+ * 資料來源：src/seed-data/*.json（由 ref/ 預先轉換）
  * 執行方式：npm run seed
  */
 
@@ -15,7 +15,7 @@ import {
   productCategories,
   customers,
   vendors,
-  groups,
+
   stations,
   equipment,
   devices,
@@ -27,99 +27,25 @@ import {
   adminUsers,
 } from './models/schema'
 
-// ── CSV parser (simple, no external dependency) ──────────────────────────────
+// ── JSON loader ─────────────────────────────────────────────────────────────
 
-function parseCsv(filePath: string): Record<string, string>[] {
-  const raw = fs.readFileSync(filePath, 'utf-8')
-  // Handle BOM
-  const content = raw.replace(/^\uFEFF/, '')
-  const lines = content.split('\n').filter((l) => l.trim().length > 0)
-  if (lines.length < 2) return []
+const SEED_DIR = path.resolve(__dirname, '../src/seed-data')
+// Fallback for compiled dist/ output where __dirname = backend/dist
+const SEED_DIR_ALT = path.resolve(__dirname, '../seed-data')
 
-  const headers = parseCsvLine(lines[0]!)
-  const rows: Record<string, string>[] = []
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCsvLine(lines[i]!)
-    const row: Record<string, string> = {}
-    for (let j = 0; j < headers.length; j++) {
-      row[headers[j]!] = values[j] ?? ''
-    }
-    rows.push(row)
-  }
-  return rows
+function loadJson<T>(filename: string): T {
+  const primary = path.join(SEED_DIR, filename)
+  const fallback = path.join(SEED_DIR_ALT, filename)
+  const filePath = fs.existsSync(primary) ? primary : fallback
+  return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as T
 }
 
-function parseCsvLine(line: string): string[] {
-  const result: string[] = []
-  let current = ''
-  let inQuotes = false
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i]!
-    if (inQuotes) {
-      if (char === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"'
-          i++
-        } else {
-          inQuotes = false
-        }
-      } else {
-        current += char
-      }
-    } else {
-      if (char === '"') {
-        inQuotes = true
-      } else if (char === ',') {
-        result.push(current.trim())
-        current = ''
-      } else {
-        current += char
-      }
-    }
-  }
-  result.push(current.trim())
-  return result
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-// Docker: /ref (mounted volume), Local: ../../ref
-const REF_DIR_DOCKER = '/ref/10_資料表'
-const REF_DIR_LOCAL = path.resolve(__dirname, '../../ref/10_資料表')
-const REF_DIR = fs.existsSync(REF_DIR_DOCKER) ? REF_DIR_DOCKER : REF_DIR_LOCAL
-
-function readSeed(filename: string): Record<string, string>[] {
-  return parseCsv(path.join(REF_DIR, '00_seed', filename))
-}
-
-function readCanonical(filename: string): Record<string, string>[] {
-  return parseCsv(path.join(REF_DIR, '01_canonical', filename))
-}
-
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 /** S* prefix → 軟板 category code, Y* → 軟硬結合板 category code */
 function prefixToCategoryCode(prefixCode: string): string {
   return prefixCode.startsWith('Y') ? 'RFB' : 'FPC'
 }
-
-// ── Stage definitions (production flow order) ────────────────────────────────
-
-const STAGE_DEFS: { name: string; code: string; stage: string; sortOrder: number }[] = [
-  { name: '前段加工組', code: 'PRE', stage: '前段加工', sortOrder: 1 },
-  { name: '鑽孔組', code: 'DRL', stage: '鑽孔/孔加工', sortOrder: 2 },
-  { name: '鍍銅組', code: 'PTH', stage: '鍍銅/PTH', sortOrder: 3 },
-  { name: '線路組', code: 'CIR', stage: '線路', sortOrder: 4 },
-  { name: '貼合壓合組', code: 'LAM', stage: '貼合/壓合', sortOrder: 5 },
-  { name: '防焊表處組', code: 'SRF', stage: '防焊/表面處理', sortOrder: 6 },
-  { name: '文字印刷組', code: 'PRT', stage: '文字/印刷', sortOrder: 7 },
-  { name: '成型加工組', code: 'FRM', stage: '成型加工', sortOrder: 8 },
-  { name: '檢驗測試組', code: 'QC', stage: '檢驗/測試', sortOrder: 9 },
-  { name: '後加工組', code: 'POST', stage: '後加工', sortOrder: 10 },
-  { name: '倉庫出貨組', code: 'WH', stage: '倉庫/待出貨', sortOrder: 11 },
-  { name: '未分類', code: 'OTH', stage: '未分類', sortOrder: 12 },
-]
 
 async function seed() {
   console.log('[seed] Starting...')
@@ -171,7 +97,7 @@ async function seed() {
 
   // ── Customers ──────────────────────────────────────────────────────────────
   console.log('[seed] Creating customers...')
-  const customerRows = readSeed('customer_master_seed.csv')
+  const customerRows = loadJson<Record<string, string>[]>('customers.json')
   if (customerRows.length > 0) {
     await db
       .insert(customers)
@@ -188,7 +114,7 @@ async function seed() {
 
   // ── Vendors ────────────────────────────────────────────────────────────────
   console.log('[seed] Creating vendors...')
-  const vendorRows = readSeed('vendor_master_candidate.csv')
+  const vendorRows = loadJson<Record<string, string>[]>('vendors.json')
   if (vendorRows.length > 0) {
     await db
       .insert(vendors)
@@ -207,59 +133,24 @@ async function seed() {
   }
   console.log(`[seed]   → ${vendorRows.length} vendors`)
 
-  // ── Groups (by stage) ─────────────────────────────────────────────────────
-  console.log('[seed] Creating groups...')
-  await db
-    .insert(groups)
-    .values(
-      STAGE_DEFS.map((s) => ({
-        departmentId: deptMain.id,
-        name: s.name,
-        code: s.code,
-        stage: s.stage,
-        description: `製程階段：${s.stage}`,
-        sortOrder: s.sortOrder,
-      })),
-    )
-    .onConflictDoNothing()
-
-  const allGroups = await db.select().from(groups)
-
-  /** Find group by department and stage */
-  function findGroup(deptId: string, stage: string) {
-    return allGroups.find((g) => g.departmentId === deptId && g.stage === stage)
-  }
-
-  // ── Stations (from process_dictionary_seed) ────────────────────────────────
+  // ── Stations (from processes.json) ─────────────────────────────────────────
   console.log('[seed] Creating stations...')
-  const processDictRows = readSeed('process_dictionary_seed.csv')
+  const processDictRows = loadJson<Record<string, string>[]>('processes.json')
 
-  // Sort by observed_count descending for sort_order within each stage
-  const stageCounters: Record<string, number> = {}
-
-  const stationValues = processDictRows.map((r) => {
-    const stage = r['normalized_stage_guess'] ?? '未分類'
-    const group = findGroup(deptMain.id, stage)
-    const stageKey = stage
-    stageCounters[stageKey] = (stageCounters[stageKey] ?? 0) + 1
-
-    return {
-      departmentId: deptMain.id,
-      groupId: group?.id ?? null,
-      name: r['raw_process_name']!,
-      code: null as string | null,
-      description: `${r['process_category_guess'] ?? 'operation'}` +
-        (r['default_vendor_guess'] ? `（常見委外：${r['default_vendor_guess']}）` : ''),
-      sortOrder: stageCounters[stageKey]!,
-    }
-  })
+  const stationValues = processDictRows.map((r, i) => ({
+    departmentId: deptMain.id,
+    name: r['raw_process_name']!,
+    code: null as string | null,
+    description: `${r['process_category_guess'] ?? 'operation'}` +
+      (r['default_vendor_guess'] ? `（常見委外：${r['default_vendor_guess']}）` : ''),
+    sortOrder: i + 1,
+  }))
 
   await db.insert(stations).values(stationValues).onConflictDoNothing()
   console.log(`[seed]   → ${processDictRows.length} stations`)
 
   const allStations = await db.select().from(stations)
 
-  /** Find station by process name */
   function findStation(_deptId: string, processName: string) {
     return allStations.find((s) => s.name === processName)
   }
@@ -269,8 +160,7 @@ async function seed() {
   const existingEquipment = await db.select({ stationId: equipment.stationId }).from(equipment)
   const equippedStationIds = new Set(existingEquipment.map((e) => e.stationId))
 
-  // Use station_capacity_dictionary for equipment names where available
-  const capacityRows = readCanonical('station_capacity_dictionary.csv')
+  const capacityRows = loadJson<Record<string, string>[]>('capacities.json')
   const capacityMap = new Map<string, string>()
   for (const r of capacityRows) {
     const equipName = r['primary_equipment_name']
@@ -342,7 +232,6 @@ async function seed() {
   ]
 
   for (const tpl of TEMPLATES) {
-    // Upsert route (by name — idempotent)
     const existing = await db
       .select({ id: processRoutes.id })
       .from(processRoutes)
@@ -368,7 +257,6 @@ async function seed() {
       templateRouteId = created!.id
     }
 
-    // Skip if steps already seeded
     const existingSteps = await db
       .select({ id: processSteps.id })
       .from(processSteps)
@@ -394,11 +282,10 @@ async function seed() {
     }
   }
 
-  // ── Products (from part_master_seed) ───────────────────────────────────────
+  // ── Products (from parts.json) ─────────────────────────────────────────────
   console.log('[seed] Creating products...')
-  const partRows = readSeed('part_master_seed.csv')
+  const partRows = loadJson<Record<string, string>[]>('parts.json')
 
-  // Filter out composite part numbers (containing 、 or &) — they are route aliases, not real products
   const realParts = partRows.filter(
     (r) => !r['part_number']!.includes('、') && !r['part_number']!.includes('&'),
   )
@@ -426,11 +313,10 @@ async function seed() {
     productMap.set(p.modelNumber, p)
   }
 
-  // ── Process Routes (from route_template_seed) ──────────────────────────────
+  // ── Process Routes (from routes.json) ──────────────────────────────────────
   console.log('[seed] Creating process routes...')
-  const routeTemplateRows = readSeed('route_template_seed.csv')
+  const routeTemplateRows = loadJson<Record<string, string>[]>('routes.json')
 
-  // Group by route_template_id
   const routeGroups = new Map<string, typeof routeTemplateRows>()
   for (const r of routeTemplateRows) {
     const templateId = r['route_template_id']!
@@ -438,7 +324,7 @@ async function seed() {
     routeGroups.get(templateId)!.push(r)
   }
 
-  const routeIdMap = new Map<string, string>() // route_template_id → UUID
+  const routeIdMap = new Map<string, string>()
 
   for (const [templateId, steps] of routeGroups) {
     const [route] = await db
@@ -457,7 +343,6 @@ async function seed() {
     }
   }
 
-  // Re-query to get all routes (in case some were already created)
   const allRoutes = await db.select().from(processRoutes)
   for (const r of allRoutes) {
     if (!routeIdMap.has(r.name)) {
@@ -510,7 +395,6 @@ async function seed() {
   console.log('[seed] Linking products to routes...')
   let linkedCount = 0
   for (const [templateId, routeId] of routeIdMap) {
-    // Skip composite template IDs (e.g. "SA177A008A、B") — no matching product
     if (templateId.includes('、') || templateId.includes('&')) continue
     await db
       .update(products)
@@ -520,32 +404,23 @@ async function seed() {
   }
   console.log(`[seed]   → ${linkedCount} products linked to routes`)
 
-  // ── Work Orders (from work_order_seed) ─────────────────────────────────────
+  // ── Work Orders (from work-orders.json) ────────────────────────────────────
   console.log('[seed] Creating work orders...')
-  const woRows = readSeed('work_order_seed.csv')
+  const woData = loadJson<{ orderNumber: string; partNumber: string; qty: number; dueDate: string | null; status: string; priority: string; note: string }[]>('work-orders.json')
 
-  // Assign order numbers sequentially
-  let woCounter = 0
-  const year = new Date().getFullYear()
   let woCreated = 0
 
-  for (const r of woRows) {
-    const partNumber = r['part_number']!
-    const product = productMap.get(partNumber)
+  for (const wo of woData) {
+    const product = productMap.get(wo.partNumber)
     if (!product) {
-      console.warn(`[seed]   ⚠ Product not found for WO: ${partNumber}`)
+      console.warn(`[seed]   ⚠ Product not found for WO: ${wo.partNumber}`)
       continue
     }
 
-    woCounter++
-    const seqNum = String(woCounter).padStart(3, '0')
-    const orderNumber = `WO-MAIN-${year}-${seqNum}`
-
-    // Find a matching route for this product (exact match, then composite)
-    let finalRouteId = routeIdMap.get(partNumber)
+    let finalRouteId = routeIdMap.get(wo.partNumber)
     if (!finalRouteId) {
       for (const [tid, rid] of routeIdMap) {
-        if (tid.includes(partNumber) || partNumber.includes(tid)) {
+        if (tid.includes(wo.partNumber) || wo.partNumber.includes(tid)) {
           finalRouteId = rid
           break
         }
@@ -553,40 +428,32 @@ async function seed() {
     }
 
     if (!finalRouteId) {
-      console.warn(`[seed]   ⚠ No route for WO: ${partNumber}, skipping`)
-      continue
+      finalRouteId = product.routeId ?? undefined
     }
 
-    // Map status
-    const statusGuess = r['current_status_guess'] ?? 'in_progress'
-    let status = 'pending'
-    if (statusGuess === 'shipped') status = 'completed'
-    else if (statusGuess === 'in_progress') status = 'in_progress'
-    else if (statusGuess === 'warehouse') status = 'in_progress'
-    else if (statusGuess === 'outsourced') status = 'in_progress'
-    else if (statusGuess === 'rework') status = 'in_progress'
-    else if (statusGuess === 'customer_hold') status = 'pending'
+    if (!finalRouteId) {
+      console.warn(`[seed]   ⚠ No route for WO: ${wo.partNumber} (routeId=null)`)
+    }
 
-    const qty = parseInt(r['order_qty'] ?? '0', 10)
-    if (qty <= 0) continue
-
-    // await db
-    //   .insert(workOrders)
-    //   .values({
-    //     departmentId: product.departmentId,
-    //     orderNumber,
-    //     productId: product.id,
-    //     routeId: finalRouteId,
-    //     plannedQty: qty,
-    //     status,
-    //     priority: 'normal',
-    //     dueDate: r['promised_due_date'] || null,
-    //   })
-    //   .onConflictDoNothing()
+    await db
+      .insert(workOrders)
+      .values({
+        departmentId: product.departmentId,
+        orderNumber: wo.orderNumber,
+        productId: product.id,
+        routeId: finalRouteId ?? null,
+        orderQty: wo.qty,
+        plannedQty: wo.qty,
+        status: wo.status,
+        priority: wo.priority,
+        dueDate: wo.dueDate,
+        note: wo.note || null,
+      })
+      .onConflictDoNothing()
 
     woCreated++
   }
-  console.log(`[seed]   → ${woCreated} work orders`)
+  console.log(`[seed]   → ${woCreated} work orders (${woData.filter(w => w.priority === 'urgent').length} urgent)`)
 
   console.log('[seed] Done ✓')
   process.exit(0)

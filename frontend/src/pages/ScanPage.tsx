@@ -283,7 +283,7 @@ export function ScanPage() {
               name="orderNumber"
               autoComplete="off"
               autoCapitalize="characters"
-              placeholder="WO-FPC-2026-001"
+              placeholder="1150413001"
               className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 text-base"
             />
             <button type="submit"

@@ -11,110 +11,77 @@ function getTaiwanTodayStart(): Date {
   return new Date(`${dateStr}T00:00:00+08:00`)
 }
 
-// GET /api/dashboard/wip?department_id=&mode=in_station|queuing
+// GET /api/dashboard/wip?department_id=
 router.get('/wip', async (req, res, next) => {
   try {
-    const { department_id, mode = 'in_station' } = req.query as Record<string, string>
+    const { department_id } = req.query as Record<string, string>
+    const deptWO = department_id ? sql`AND wo.department_id = ${department_id}` : sql``
+    const deptSt = department_id ? sql`AND d.id = ${department_id}` : sql``
 
-    if (mode !== 'queuing') {
-      // in_station: work orders currently checked in (open station_log)
-      const rows = await db
-        .select({
-          stationId: stations.id,
-          stationName: stations.name,
-          stationCode: stations.code,
-          stationSortOrder: stations.sortOrder,
-          groupId: groups.id,
-          groupName: groups.name,
-          groupStage: groups.stage,
-          groupSortOrder: groups.sortOrder,
-          departmentId: departments.id,
-          departmentName: departments.name,
-          departmentCode: departments.code,
-          wipCount: count(stationLogs.id),
-        })
-        .from(stations)
-        .innerJoin(departments, eq(stations.departmentId, departments.id))
-        .leftJoin(groups, eq(stations.groupId, groups.id))
-        .leftJoin(
-          stationLogs,
-          and(
-            eq(stationLogs.stationId, stations.id),
-            eq(stationLogs.status, 'in_progress'),
-            isNull(stationLogs.checkOutTime),
-          ),
-        )
-        .where(
-          and(
-            eq(stations.isActive, true),
-            department_id ? eq(departments.id, department_id) : undefined,
-          ),
-        )
-        .groupBy(
-          stations.id, stations.name, stations.code, stations.sortOrder,
-          groups.id, groups.name, groups.stage, groups.sortOrder,
-          departments.id, departments.name, departments.code,
-        )
-        .orderBy(departments.code, sql`COALESCE(${groups.sortOrder}, 999)`, stations.sortOrder)
-
-      res.json({ success: true, data: rows })
-    } else {
-      // queuing: work orders waiting to enter their next station
-      const deptWO = department_id ? sql`AND wo.department_id = ${department_id}` : sql``
-      const deptSt = department_id ? sql`AND d.id = ${department_id}` : sql``
-
-      const result = await db.execute(sql`
-        WITH last_completed AS (
-          SELECT
-            sl.work_order_id,
-            MAX(ps.step_order) AS last_step_order
-          FROM station_logs sl
-          JOIN process_steps ps ON sl.step_id = ps.id
-          WHERE sl.status IN ('completed', 'auto_filled', 'abnormal')
-          GROUP BY sl.work_order_id
-        ),
-        currently_in_station AS (
-          SELECT DISTINCT sl.work_order_id
-          FROM station_logs sl
-          WHERE sl.status = 'in_progress' AND sl.check_out_time IS NULL
-        ),
-        queuing_at AS (
-          SELECT
-            wo.id AS work_order_id,
-            ps.station_id
-          FROM work_orders wo
-          JOIN process_steps ps ON ps.route_id = wo.route_id
-          LEFT JOIN last_completed lc ON lc.work_order_id = wo.id
-          WHERE wo.status = 'in_progress'
-            AND wo.id NOT IN (SELECT work_order_id FROM currently_in_station)
-            AND ps.step_order = COALESCE(lc.last_step_order, 0) + 1
-          ${deptWO}
-        )
+    const result = await db.execute(sql`
+      WITH in_station AS (
+        SELECT sl.station_id, COUNT(DISTINCT sl.work_order_id)::int AS cnt
+        FROM station_logs sl
+        WHERE sl.status = 'in_progress' AND sl.check_out_time IS NULL
+        GROUP BY sl.station_id
+      ),
+      last_completed AS (
         SELECT
-          s.id AS "stationId",
-          s.name AS "stationName",
-          s.code AS "stationCode",
-          s.sort_order AS "stationSortOrder",
-          g.id AS "groupId",
-          g.name AS "groupName",
-          g.stage AS "groupStage",
-          COALESCE(g.sort_order, 999) AS "groupSortOrder",
-          d.id AS "departmentId",
-          d.name AS "departmentName",
-          d.code AS "departmentCode",
-          COUNT(qa.work_order_id)::int AS "wipCount"
-        FROM stations s
-        JOIN departments d ON s.department_id = d.id
-        LEFT JOIN groups g ON s.group_id = g.id
-        LEFT JOIN queuing_at qa ON qa.station_id = s.id
-        WHERE s.is_active = true
-        ${deptSt}
-        GROUP BY s.id, s.name, s.code, s.sort_order, g.id, g.name, g.stage, g.sort_order, d.id, d.name, d.code
-        ORDER BY d.code, COALESCE(g.sort_order, 999), s.sort_order
-      `)
+          sl.work_order_id,
+          MAX(ps.step_order) AS last_step_order
+        FROM station_logs sl
+        JOIN process_steps ps ON sl.step_id = ps.id
+        WHERE sl.status IN ('completed', 'auto_filled', 'abnormal')
+        GROUP BY sl.work_order_id
+      ),
+      currently_in_station AS (
+        SELECT DISTINCT sl.work_order_id
+        FROM station_logs sl
+        WHERE sl.status = 'in_progress' AND sl.check_out_time IS NULL
+      ),
+      queuing_at AS (
+        SELECT
+          wo.id AS work_order_id,
+          ps.station_id
+        FROM work_orders wo
+        JOIN process_steps ps ON ps.route_id = wo.route_id
+        LEFT JOIN last_completed lc ON lc.work_order_id = wo.id
+        WHERE wo.status = 'in_progress'
+          AND wo.id NOT IN (SELECT work_order_id FROM currently_in_station)
+          AND ps.step_order = COALESCE(lc.last_step_order, 0) + 1
+        ${deptWO}
+      ),
+      queuing_count AS (
+        SELECT station_id, COUNT(*)::int AS cnt
+        FROM queuing_at
+        GROUP BY station_id
+      )
+      SELECT
+        s.id AS "stationId",
+        s.name AS "stationName",
+        s.code AS "stationCode",
+        s.sort_order AS "stationSortOrder",
+        g.id AS "groupId",
+        g.name AS "groupName",
+        g.stage AS "groupStage",
+        COALESCE(g.sort_order, 999) AS "groupSortOrder",
+        d.id AS "departmentId",
+        d.name AS "departmentName",
+        d.code AS "departmentCode",
+        COALESCE(ins.cnt, 0) AS "wipCount",
+        COALESCE(qc.cnt, 0) AS "queuingCount"
+      FROM stations s
+      JOIN departments d ON s.department_id = d.id
+      LEFT JOIN groups g ON s.group_id = g.id
+      LEFT JOIN in_station ins ON ins.station_id = s.id
+      LEFT JOIN queuing_count qc ON qc.station_id = s.id
+      WHERE s.is_active = true
+      ${deptSt}
+      GROUP BY s.id, s.name, s.code, s.sort_order, g.id, g.name, g.stage, g.sort_order, d.id, d.name, d.code, ins.cnt, qc.cnt
+      ORDER BY d.code, COALESCE(g.sort_order, 999), s.sort_order
+    `)
 
-      res.json({ success: true, data: result.rows })
-    }
+    res.json({ success: true, data: result.rows })
   } catch (err) {
     next(err)
   }
@@ -182,11 +149,18 @@ router.get('/work-order-progress', async (req, res, next) => {
       completed_steps AS (
         SELECT
           sl.work_order_id,
-          COUNT(*)::int AS completed_steps,
-          MAX(sl.check_in_time) AS last_activity_at
+          COUNT(*)::int AS completed_steps
         FROM station_logs sl
         WHERE sl.status IN ('completed', 'auto_filled', 'abnormal')
         GROUP BY sl.work_order_id
+      ),
+      last_activity AS (
+        SELECT DISTINCT ON (sl.work_order_id)
+          sl.work_order_id,
+          COALESCE(sl.check_out_time, sl.check_in_time) AS last_activity_at,
+          CASE WHEN sl.check_out_time IS NOT NULL THEN 'out' ELSE 'in' END AS last_activity_type
+        FROM station_logs sl
+        ORDER BY sl.work_order_id, COALESCE(sl.check_out_time, sl.check_in_time) DESC
       ),
       current_station AS (
         SELECT DISTINCT ON (sl.work_order_id)
@@ -216,13 +190,15 @@ router.get('/work-order-progress', async (req, res, next) => {
         COALESCE(sc.total_steps, 0) AS "totalSteps",
         cur.current_station_name AS "currentStationName",
         cur.current_group_name AS "currentGroupName",
-        cs.last_activity_at AS "lastActivityAt"
+        la.last_activity_at AS "lastActivityAt",
+        la.last_activity_type AS "lastActivityType"
       FROM work_orders wo
       JOIN products p ON wo.product_id = p.id
       JOIN departments d ON wo.department_id = d.id
       LEFT JOIN step_counts sc ON sc.route_id = wo.route_id
       LEFT JOIN completed_steps cs ON cs.work_order_id = wo.id
       LEFT JOIN current_station cur ON cur.work_order_id = wo.id
+      LEFT JOIN last_activity la ON la.work_order_id = wo.id
       WHERE 1=1 ${deptWhere} ${statusWhere}
       ORDER BY
         CASE wo.priority WHEN 'urgent' THEN 0 ELSE 1 END,

@@ -2,15 +2,21 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAdminAuth } from '../contexts/AdminAuthContext'
 
 const NAV_ITEMS = [
+  { to: '/admin/dashboard', label: '看板' },
   { to: '/admin/work-orders', label: '工單管理' },
   { to: '/admin/products', label: '產品型號' },
-  { to: '/admin/categories', label: '產品種類' },
   { to: '/admin/stations', label: '站點管理' },
   { to: '/admin/groups', label: '組別管理' },
   { to: '/admin/equipment', label: '設備管理' },
   { to: '/admin/departments', label: '產線管理' },
   { to: '/admin/users', label: '管理員帳號' },
   { to: '/admin/roles', label: '角色管理' },
+]
+
+const QUICK_LINKS = [
+  { to: '/dashboard', label: '看板', icon: '📊' },
+  { to: '/scan', label: '掃描', icon: '📷' },
+  { to: '/trace', label: '追溯', icon: '🔍' },
 ]
 
 export function AdminLayout() {
@@ -26,9 +32,25 @@ export function AdminLayout() {
     <div className="flex h-screen bg-slate-100 overflow-hidden">
       {/* Sidebar */}
       <aside className="w-52 bg-slate-800 flex flex-col shrink-0">
-        <div className="px-4 py-5 border-b border-slate-700">
-          <p className="text-white font-bold text-sm">WIP 管理後台</p>
+        <div className="px-4 py-4 border-b border-slate-700">
+          <NavLink to="/admin" className="text-white font-bold text-sm hover:text-blue-300 transition-colors">
+            WIP 管理後台
+          </NavLink>
           <p className="text-slate-400 text-xs mt-0.5 truncate">{user?.username}</p>
+          <div className="flex gap-1.5 mt-2">
+            {QUICK_LINKS.map(link => (
+              <a
+                key={link.to}
+                href={link.to}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 text-center bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded px-1.5 py-1 text-[10px] transition-colors"
+                title={link.label}
+              >
+                {link.icon} {link.label}
+              </a>
+            ))}
+          </div>
         </div>
         <nav className="flex-1 overflow-y-auto py-2">
           {NAV_ITEMS.map(item => (
@@ -46,13 +68,7 @@ export function AdminLayout() {
             </NavLink>
           ))}
         </nav>
-        <div className="px-4 py-4 border-t border-slate-700 space-y-2">
-          <NavLink
-            to="/"
-            className="block text-slate-400 hover:text-white text-xs text-center transition-colors"
-          >
-            ← 回掃描頁
-          </NavLink>
+        <div className="px-4 py-4 border-t border-slate-700">
           <button
             onClick={handleLogout}
             className="w-full text-slate-400 hover:text-red-400 text-xs transition-colors cursor-pointer"

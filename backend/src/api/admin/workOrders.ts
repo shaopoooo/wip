@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { and, asc, desc, eq, like, SQL } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, like, or, SQL } from 'drizzle-orm'
 import { z } from 'zod'
 import QRCode from 'qrcode'
 import { db } from '../../models/db'
@@ -7,25 +7,39 @@ import { workOrders, products, processRoutes, departments, stationLogs, stations
 import { adminAuth } from '../../middleware/adminAuth'
 import { sendSuccess } from '../../utils/response'
 import { AppError, ErrorCode } from '../../utils/errors'
+import { SplitService } from '../../services/SplitService'
 
 const router = Router()
 router.use(adminAuth)
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Resolve :id param — accepts UUID or orderNumber, returns UUID */
+async function resolveWoId(param: string): Promise<string | null> {
+  const cond = UUID_RE.test(param) ? eq(workOrders.id, param) : eq(workOrders.orderNumber, param)
+  const [row] = await db.select({ id: workOrders.id }).from(workOrders).where(cond).limit(1)
+  return row?.id ?? null
+}
+
 const CreateWorkOrderSchema = z.object({
   departmentId: z.string().uuid(),
   productId: z.string().uuid(),
-  routeId: z.string().uuid(),
-  plannedQty: z.number().int().min(1),         // 製作數量
-  orderQty: z.number().int().min(1).optional(), // 訂單需求數量（選填，預設等於 plannedQty）
+  orderQty: z.number().int().min(1),              // 訂單數量（必填）
+  plannedQty: z.number().int().min(1).optional(),  // 製作數量（選填，預設等於 orderQty）
   priority: z.enum(['normal', 'urgent']).default('normal'),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  note: z.string().optional().nullable(),
 })
 
 // ── Auto-generate order number ────────────────────────────────────────────────
+// Format: {ROC_YYYMMDD}{3-digit seq}  e.g. 1150409001
 
-async function generateOrderNumber(deptCode: string): Promise<string> {
-  const year = new Date().getFullYear()
-  const prefix = `WO-${deptCode}-${year}-`
+async function generateOrderNumber(_deptCode: string): Promise<string> {
+  const now = new Date()
+  const rocYear = now.getFullYear() - 1911
+  const mm = String(now.getMonth() + 1).padStart(2, '0')
+  const dd = String(now.getDate()).padStart(2, '0')
+  const prefix = `${rocYear}${mm}${dd}`
 
   const [last] = await db
     .select({ orderNumber: workOrders.orderNumber })
@@ -34,15 +48,18 @@ async function generateOrderNumber(deptCode: string): Promise<string> {
     .orderBy(desc(workOrders.orderNumber))
     .limit(1)
 
-  const seq = last ? (parseInt(last.orderNumber.slice(-3), 10) || 0) + 1 : 1
+  const seq = last ? (parseInt(last.orderNumber.slice(prefix.length, prefix.length + 3), 10) || 0) + 1 : 1
   return `${prefix}${String(seq).padStart(3, '0')}`
 }
 
-// GET /api/admin/work-orders?department_id=&status=&page=&limit=
+// GET /api/admin/work-orders?department_id=&status=&search=&sort_by=&sort_dir=&page=&limit=
 router.get('/', async (req, res, next) => {
   try {
     const departmentId = req.query['department_id'] as string | undefined
     const status = req.query['status'] as string | undefined
+    const search = (req.query['search'] as string | undefined)?.trim()
+    const sortBy = req.query['sort_by'] as string | undefined
+    const sortDir = req.query['sort_dir'] === 'asc' ? 'asc' : 'desc'
     const page = Math.max(1, Number(req.query['page'] ?? 1))
     const limit = Math.min(100, Math.max(1, Number(req.query['limit'] ?? 20)))
     const offset = (page - 1) * limit
@@ -53,8 +70,27 @@ router.get('/', async (req, res, next) => {
 
     const conditions: SQL[] = [eq(workOrders.departmentId, departmentId)]
     if (status) conditions.push(eq(workOrders.status, status))
+    if (search) {
+      const pattern = `%${search}%`
+      conditions.push(or(
+        ilike(workOrders.orderNumber, pattern),
+        ilike(products.modelNumber, pattern),
+        ilike(products.name, pattern),
+      )!)
+    }
 
-    const rows = await db
+    // Sortable columns whitelist
+    const sortColMap = {
+      order_number: workOrders.orderNumber,
+      order_qty: workOrders.orderQty,
+      due_date: workOrders.dueDate,
+      created_at: workOrders.createdAt,
+    } as const
+    type SortKey = keyof typeof sortColMap
+    const sortCol = (sortBy && sortBy in sortColMap) ? sortColMap[sortBy as SortKey] : workOrders.createdAt
+    const orderExpr = sortDir === 'asc' ? asc(sortCol) : desc(sortCol)
+
+    const baseQuery = db
       .select({
         workOrder: workOrders,
         product: { name: products.name, modelNumber: products.modelNumber },
@@ -62,31 +98,60 @@ router.get('/', async (req, res, next) => {
       .from(workOrders)
       .innerJoin(products, eq(workOrders.productId, products.id))
       .where(and(...conditions))
-      .orderBy(desc(workOrders.createdAt))
-      .limit(limit)
-      .offset(offset)
 
-    sendSuccess(res, { items: rows, page, limit })
+    const [rows, [totalRow]] = await Promise.all([
+      baseQuery
+        .orderBy(orderExpr)
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: count() })
+        .from(workOrders)
+        .innerJoin(products, eq(workOrders.productId, products.id))
+        .where(and(...conditions)),
+    ])
+
+    sendSuccess(res, { items: rows, total: totalRow?.count ?? 0, page, limit })
   } catch (err) {
     next(err)
   }
 })
 
-// GET /api/admin/work-orders/:id
+// GET /api/admin/work-orders/:id — supports UUID or orderNumber
 router.get('/:id', async (req, res, next) => {
   try {
-    const { id } = req.params as { id: string }
+    const woId = await resolveWoId(req.params['id'] as string)
+    if (!woId) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
+
+    // Sync latest routeId from product before querying
+    const [woRow] = await db
+      .select({ id: workOrders.id, productId: workOrders.productId, routeId: workOrders.routeId })
+      .from(workOrders)
+      .where(eq(workOrders.id, woId))
+      .limit(1)
+
+    if (!woRow) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
+
+    const [prod] = await db
+      .select({ routeId: products.routeId })
+      .from(products)
+      .where(eq(products.id, woRow.productId))
+      .limit(1)
+
+    const latestRouteId = prod?.routeId ?? woRow.routeId
+    if (latestRouteId && latestRouteId !== woRow.routeId) {
+      await db.update(workOrders).set({ routeId: latestRouteId, updatedAt: new Date() }).where(eq(workOrders.id, woRow.id))
+    }
 
     const rows = await db
       .select({
         workOrder: workOrders,
-        product: { name: products.name, modelNumber: products.modelNumber },
-        route: { name: processRoutes.name },
+        product: { name: products.name, modelNumber: products.modelNumber, description: products.description },
+        route: { name: processRoutes.name, description: processRoutes.description },
       })
       .from(workOrders)
       .innerJoin(products, eq(workOrders.productId, products.id))
-      .innerJoin(processRoutes, eq(workOrders.routeId, processRoutes.id))
-      .where(eq(workOrders.id, id))
+      .leftJoin(processRoutes, eq(workOrders.routeId, processRoutes.id))
+      .where(eq(workOrders.id, woRow.id))
       .limit(1)
 
     if (rows.length === 0) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
@@ -105,7 +170,7 @@ router.get('/:id', async (req, res, next) => {
       })
       .from(stationLogs)
       .innerJoin(stations, eq(stationLogs.stationId, stations.id))
-      .where(eq(stationLogs.workOrderId, id))
+      .where(eq(stationLogs.workOrderId, woRow.id))
       .orderBy(asc(stationLogs.checkInTime))
 
     sendSuccess(res, { ...rows[0], logs })
@@ -130,21 +195,13 @@ router.post('/', async (req, res, next) => {
       .limit(1)
     if (!dept) return next(new AppError(ErrorCode.NOT_FOUND, '部門不存在', 404))
 
-    // Validate product belongs to department
+    // Validate product belongs to department & get routeId
     const [product] = await db
-      .select({ id: products.id })
+      .select({ id: products.id, routeId: products.routeId })
       .from(products)
       .where(and(eq(products.id, parsed.data.productId), eq(products.departmentId, parsed.data.departmentId)))
       .limit(1)
     if (!product) return next(new AppError(ErrorCode.NOT_FOUND, '產品不屬於此部門', 404))
-
-    // Validate route belongs to department
-    const [route] = await db
-      .select({ id: processRoutes.id })
-      .from(processRoutes)
-      .where(and(eq(processRoutes.id, parsed.data.routeId), eq(processRoutes.departmentId, parsed.data.departmentId)))
-      .limit(1)
-    if (!route) return next(new AppError(ErrorCode.NOT_FOUND, '路由不屬於此部門', 404))
 
     const orderNumber = await generateOrderNumber(dept.code)
 
@@ -154,16 +211,77 @@ router.post('/', async (req, res, next) => {
         departmentId: parsed.data.departmentId,
         orderNumber,
         productId: parsed.data.productId,
-        routeId: parsed.data.routeId,
-        plannedQty: parsed.data.plannedQty,
-        orderQty: parsed.data.orderQty ?? parsed.data.plannedQty,
+        routeId: product.routeId ?? null,
+        orderQty: parsed.data.orderQty,
+        plannedQty: parsed.data.plannedQty ?? parsed.data.orderQty,
         status: 'pending',
         priority: parsed.data.priority,
         dueDate: parsed.data.dueDate ?? null,
+        note: parsed.data.note ?? null,
       })
       .returning()
 
     sendSuccess(res, wo, 201)
+  } catch (err) {
+    next(err)
+  }
+})
+
+// PATCH /api/admin/work-orders/:id — edit work order fields
+const UpdateWorkOrderSchema = z.object({
+  orderNumber: z.string().min(1).max(50).optional(),
+  orderQty: z.number().int().min(1).optional(),
+  plannedQty: z.number().int().min(1).optional(),
+  priority: z.enum(['normal', 'urgent']).optional(),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  note: z.string().optional().nullable(),
+  productId: z.string().uuid().optional(),
+})
+
+router.patch('/:id', async (req, res, next) => {
+  try {
+    const woId = await resolveWoId(req.params['id'] as string)
+    if (!woId) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
+
+    const parsed = UpdateWorkOrderSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid body'))
+    }
+
+    // Don't allow editing completed/cancelled/split work orders
+    const [current] = await db.select({ status: workOrders.status }).from(workOrders).where(eq(workOrders.id, woId)).limit(1)
+    if (!current) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
+    if (['completed', 'cancelled', 'split'].includes(current.status)) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, '已完工/已取消/已拆單的工單不可編輯'))
+    }
+
+    const updates: Record<string, unknown> = { updatedAt: new Date() }
+    if (parsed.data.orderNumber !== undefined) updates['orderNumber'] = parsed.data.orderNumber
+    if (parsed.data.orderQty !== undefined) updates['orderQty'] = parsed.data.orderQty
+    if (parsed.data.plannedQty !== undefined) updates['plannedQty'] = parsed.data.plannedQty
+    if (parsed.data.priority !== undefined) updates['priority'] = parsed.data.priority
+    if (parsed.data.dueDate !== undefined) updates['dueDate'] = parsed.data.dueDate
+    if (parsed.data.note !== undefined) updates['note'] = parsed.data.note
+
+    if (parsed.data.productId !== undefined) {
+      // Validate product + sync routeId
+      const [prod] = await db
+        .select({ id: products.id, routeId: products.routeId, departmentId: products.departmentId })
+        .from(products)
+        .where(eq(products.id, parsed.data.productId))
+        .limit(1)
+      if (!prod) return next(new AppError(ErrorCode.NOT_FOUND, '產品不存在', 404))
+
+      const [wo] = await db.select({ departmentId: workOrders.departmentId }).from(workOrders).where(eq(workOrders.id, woId)).limit(1)
+      if (prod.departmentId !== wo!.departmentId) {
+        return next(new AppError(ErrorCode.VALIDATION_ERROR, '產品不屬於此部門'))
+      }
+      updates['productId'] = parsed.data.productId
+      updates['routeId'] = prod.routeId ?? null
+    }
+
+    const [updated] = await db.update(workOrders).set(updates).where(eq(workOrders.id, woId)).returning()
+    sendSuccess(res, updated)
   } catch (err) {
     next(err)
   }
@@ -179,7 +297,9 @@ const STATUS_TRANSITIONS: Record<string, string[]> = {
 // PATCH /api/admin/work-orders/:id/status
 router.patch('/:id/status', async (req, res, next) => {
   try {
-    const { id } = req.params as { id: string }
+    const woId = await resolveWoId(req.params['id'] as string)
+    if (!woId) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
+
     const { status } = req.body as { status?: string }
 
     const allStatuses = ['pending', 'in_progress', 'completed', 'cancelled']
@@ -191,7 +311,7 @@ router.patch('/:id/status', async (req, res, next) => {
     const [wo] = await db
       .select({ id: workOrders.id, status: workOrders.status })
       .from(workOrders)
-      .where(eq(workOrders.id, id))
+      .where(eq(workOrders.id, woId))
       .limit(1)
 
     if (!wo) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
@@ -208,7 +328,7 @@ router.patch('/:id/status', async (req, res, next) => {
     const [updated] = await db
       .update(workOrders)
       .set({ status, updatedAt: new Date() })
-      .where(eq(workOrders.id, id))
+      .where(eq(workOrders.id, woId))
       .returning()
 
     sendSuccess(res, updated)
@@ -220,18 +340,21 @@ router.patch('/:id/status', async (req, res, next) => {
 // GET /api/admin/work-orders/:id/qrcode  — returns base64 PNG
 router.get('/:id/qrcode', async (req, res, next) => {
   try {
-    const { id } = req.params as { id: string }
+    const woId = await resolveWoId(req.params['id'] as string)
+    if (!woId) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
 
     const [wo] = await db
       .select({ orderNumber: workOrders.orderNumber, status: workOrders.status })
       .from(workOrders)
-      .where(eq(workOrders.id, id))
+      .where(eq(workOrders.id, woId))
       .limit(1)
 
     if (!wo) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
 
-    // QR content = the order number (scanned by PWA)
-    const dataUrl = await QRCode.toDataURL(wo.orderNumber, {
+    // QR content = scan URL with order number
+    const appUrl = (process.env['APP_URL'] ?? '').replace(/\/+$/, '')
+    const qrContent = appUrl ? `${appUrl}/scan?wo=${encodeURIComponent(wo.orderNumber)}` : wo.orderNumber
+    const dataUrl = await QRCode.toDataURL(qrContent, {
       width: 300,
       margin: 2,
       errorCorrectionLevel: 'M',
@@ -262,6 +385,7 @@ router.get('/print', async (req, res, next) => {
             orderNumber: workOrders.orderNumber,
             status: workOrders.status,
             plannedQty: workOrders.plannedQty,
+            orderQty: workOrders.orderQty,
             productName: products.name,
             modelNumber: products.modelNumber,
             dueDate: workOrders.dueDate,
@@ -274,7 +398,9 @@ router.get('/print', async (req, res, next) => {
 
         if (!wo) return null
 
-        const qrDataUrl = await QRCode.toDataURL(wo.orderNumber, {
+        const appUrl = (process.env['APP_URL'] ?? '').replace(/\/+$/, '')
+        const qrContent = appUrl ? `${appUrl}/scan?wo=${encodeURIComponent(wo.orderNumber)}` : wo.orderNumber
+        const qrDataUrl = await QRCode.toDataURL(qrContent, {
           width: 200,
           margin: 1,
           errorCorrectionLevel: 'M',
@@ -285,6 +411,57 @@ router.get('/print', async (req, res, next) => {
     )
 
     sendSuccess(res, results.filter(Boolean))
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── Split ─────────────────────────────────────────────────────────────────────
+
+const SplitSchema = z.object({
+  splitReason: z.enum(['rush', 'batch_shipment']),
+  splitNote: z.string().max(500).optional(),
+  children: z.array(
+    z.object({
+      plannedQty: z.number().int().min(1),
+      priority: z.enum(['normal', 'urgent']).optional(),
+      dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+    }),
+  ).min(2, '至少需要 2 張子單'),
+})
+
+// POST /api/admin/work-orders/:id/split
+router.post('/:id/split', async (req, res, next) => {
+  try {
+    const woId = await resolveWoId(req.params['id'] as string)
+    if (!woId) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
+
+    const parsed = SplitSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid body'))
+    }
+
+    const result = await SplitService.split({
+      parentId: woId,
+      children: parsed.data.children,
+      splitReason: parsed.data.splitReason,
+      splitNote: parsed.data.splitNote,
+    })
+
+    sendSuccess(res, result, 201)
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /api/admin/work-orders/:id/split-history
+router.get('/:id/split-history', async (req, res, next) => {
+  try {
+    const woId = await resolveWoId(req.params['id'] as string)
+    if (!woId) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
+
+    const history = await SplitService.getSplitHistory(woId)
+    sendSuccess(res, { items: history })
   } catch (err) {
     next(err)
   }

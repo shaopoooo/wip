@@ -4,6 +4,7 @@ import {
   auditLogs,
   devices,
   processSteps,
+  products,
   stationLogs,
   stations,
   workOrders,
@@ -99,11 +100,26 @@ export class ScanService {
         throw new AppError(ErrorCode.ORDER_ALREADY_SPLIT, '此工單已拆分，請掃描子單')
       }
 
-      // 2. Fetch route steps ordered by step_order
+      // 2. Sync latest routeId from product, then fetch route steps
+      const [prod] = await tx
+        .select({ routeId: products.routeId })
+        .from(products)
+        .where(eq(products.id, wo.productId))
+        .limit(1)
+
+      const latestRouteId = prod?.routeId ?? wo.routeId
+      if (!latestRouteId) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, '此工單的產品尚未設定製程路由')
+      }
+
+      if (latestRouteId !== wo.routeId) {
+        await tx.update(workOrders).set({ routeId: latestRouteId, updatedAt: new Date() }).where(eq(workOrders.id, wo.id))
+      }
+
       const steps = await tx
         .select()
         .from(processSteps)
-        .where(eq(processSteps.routeId, wo.routeId))
+        .where(eq(processSteps.routeId, latestRouteId))
         .orderBy(processSteps.stepOrder)
 
       if (steps.length === 0) {
