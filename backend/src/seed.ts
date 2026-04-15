@@ -432,8 +432,7 @@ async function seed() {
     }
 
     if (!finalRouteId) {
-      console.warn(`[seed]   ⚠ No route for WO: ${wo.partNumber}, skipping`)
-      continue
+      console.warn(`[seed]   ⚠ No route for WO: ${wo.partNumber} (routeId=null)`)
     }
 
     await db
@@ -442,7 +441,7 @@ async function seed() {
         departmentId: product.departmentId,
         orderNumber: wo.orderNumber,
         productId: product.id,
-        routeId: finalRouteId,
+        routeId: finalRouteId ?? null,
         orderQty: wo.qty,
         plannedQty: wo.qty,
         status: wo.status,
