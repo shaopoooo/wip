@@ -68,6 +68,8 @@ export const departmentsApi = {
 export const devicesApi = {
   get: (deviceId: string) => api.get<DeviceInfo>(`/devices/${deviceId}`),
   register: (input: RegisterDeviceInput) => api.post<{ id: string }>('/devices/register', input),
+  update: (deviceId: string, input: { departmentId?: string; name?: string | null; employeeId?: string | null }) =>
+    api.patch<DeviceInfo>(`/devices/${deviceId}`, input),
   heartbeat: (deviceId: string) => api.patch<{ id: string; lastSeenAt: string }>(`/devices/${deviceId}/heartbeat`, {}),
 }
 

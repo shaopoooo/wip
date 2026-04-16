@@ -131,6 +131,50 @@ router.post('/register', async (req, res, next) => {
   }
 })
 
+// PATCH /api/devices/:id  — update device binding (department, name, employeeId)
+const UpdateSchema = z.object({
+  departmentId: z.string().uuid().optional(),
+  name: z.string().max(100).nullable().optional(),
+  employeeId: z.string().max(50).nullable().optional(),
+})
+
+router.patch('/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const parsed = UpdateSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid body'))
+    }
+
+    const updates: Record<string, unknown> = {}
+    if (parsed.data.departmentId !== undefined) {
+      const [dept] = await db.select({ id: departments.id }).from(departments).where(eq(departments.id, parsed.data.departmentId)).limit(1)
+      if (!dept) return next(new AppError(ErrorCode.NOT_FOUND, 'Department not found', 404))
+      updates.departmentId = parsed.data.departmentId
+    }
+    if (parsed.data.name !== undefined) updates.name = parsed.data.name
+    if (parsed.data.employeeId !== undefined) updates.employeeId = parsed.data.employeeId
+
+    if (Object.keys(updates).length === 0) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, '沒有要更新的欄位'))
+    }
+
+    const [device] = await db
+      .update(devices)
+      .set(updates)
+      .where(eq(devices.id, id))
+      .returning()
+
+    if (!device) {
+      return next(new AppError(ErrorCode.NOT_FOUND, 'Device not found', 404))
+    }
+
+    sendSuccess(res, device)
+  } catch (err) {
+    next(err)
+  }
+})
+
 // PATCH /api/devices/:id/heartbeat  — update last_seen_at
 router.patch('/:id/heartbeat', async (req, res, next) => {
   try {
