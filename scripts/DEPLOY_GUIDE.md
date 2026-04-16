@@ -1,5 +1,70 @@
 # WIP 系統 — GCP VM 部署指南
 
+## 0. 前置準備：安裝 gcloud CLI 並登入
+
+### 安裝 gcloud CLI
+
+**macOS（推薦用 Homebrew）：**
+```bash
+# cask 名稱可能是 google-cloud-sdk 或 gcloud-cli，擇一安裝
+brew install --cask google-cloud-sdk
+# 或
+brew install --cask gcloud-cli
+
+# 安裝後需載入 PATH（zsh 使用者）
+# 先找到實際路徑：
+find /opt/homebrew/Caskroom -name "path.zsh.inc" 2>/dev/null
+
+# 用 wildcard 寫入 ~/.zshrc（不受版本號升級影響）
+# google-cloud-sdk cask：
+echo 'source /opt/homebrew/share/google-cloud-sdk/path.zsh.inc' >> ~/.zshrc
+# gcloud-cli cask：
+echo 'source /opt/homebrew/Caskroom/gcloud-cli/*/google-cloud-sdk/path.zsh.inc' >> ~/.zshrc
+
+# 立即生效
+source ~/.zshrc
+```
+
+**macOS / Linux（官方安裝腳本）：**
+```bash
+curl https://sdk.cloud.google.com | bash
+# 安裝完成後重啟 shell 或執行：
+exec -l $SHELL
+```
+
+**驗證安裝：**
+```bash
+gcloud version
+```
+
+### 登入與專案設定
+
+```bash
+# 登入 Google 帳號（會開啟瀏覽器）
+gcloud auth login
+
+# 設定預設專案（替換為你的 GCP Project ID）
+gcloud config set project YOUR_PROJECT_ID
+
+# 設定預設區域
+gcloud config set compute/zone asia-east1-b
+gcloud config set compute/region asia-east1
+
+# 確認設定
+gcloud config list
+```
+
+> **如果是 Service Account（CI/CD 或無瀏覽器環境）：**
+> ```bash
+> # 用金鑰檔認證
+> gcloud auth activate-service-account --key-file=path/to/service-account-key.json
+> ```
+>
+> **如果需要 Application Default Credentials（gsutil 備份用）：**
+> ```bash
+> gcloud auth application-default login
+> ```
+
 ## 1. GCP VM 建立
 
 ```bash
@@ -15,9 +80,15 @@ gcloud compute instances create wip-prod \
 
 # 預留靜態 IP
 gcloud compute addresses create wip-ip --region=asia-east1
+
+# 移除 VM 建立時自動產生的臨時 access config，再綁定靜態 IP
+gcloud compute instances delete-access-config wip-prod \
+  --zone=asia-east1-b \
+  --access-config-name="external-nat"
+
 gcloud compute instances add-access-config wip-prod \
   --zone=asia-east1-b \
-  --access-config-name="External NAT" \
+  --access-config-name="external-nat" \
   --address=$(gcloud compute addresses describe wip-ip --region=asia-east1 --format='value(address)')
 ```
 
@@ -33,13 +104,58 @@ gcloud compute firewall-rules create allow-https \
 
 ## 3. DNS 設定
 
-在你的 DNS provider 新增 A record：
+### 3.1 查詢你的靜態 IP
 
-```
-wip.yourfactory.com → <VM 靜態 IP>
+Section 1 已預留靜態 IP，用以下指令查詢：
+
+```bash
+gcloud compute addresses describe wip-ip --region=asia-east1 --format='value(address)'
+# 輸出範例：34.81.xxx.xxx
 ```
 
-等待 DNS 生效（通常 5-15 分鐘）。
+### 3.2 購買網域（如果還沒有）
+
+常用的網域註冊商：
+
+| 註冊商 | 特色 | 網址 |
+|--------|------|------|
+| Namecheap | 價格便宜、免費 WhoisGuard | namecheap.com |
+| Cloudflare Registrar | 成本價販售、內建 CDN/DNS | dash.cloudflare.com |
+| GoDaddy | 最大註冊商、中文介面 | godaddy.com |
+| Google Domains（已轉移至 Squarespace）| 與 GCP 整合方便 | domains.squarespace.com |
+| Gandi | 歐洲老牌、隱私友善 | gandi.net |
+
+> **建議**：如果只需要 DNS 代管不需要買新網域，可以用 Cloudflare 免費 DNS（將現有網域的 nameserver 指向 Cloudflare）。
+
+### 3.3 設定 A Record
+
+在你的 DNS 管理介面新增一筆 A record：
+
+| 欄位 | 值 |
+|------|-----|
+| Type | A |
+| Name / Host | `wip`（或你想要的子網域名稱） |
+| Value / Points to | 上面查到的靜態 IP（例如 `34.81.xxx.xxx`） |
+| TTL | 300（5 分鐘，或 Auto） |
+
+以 **Cloudflare** 為例：
+1. 登入 Dashboard → 選擇你的網域
+2. 左側選 **DNS** → **Records**
+3. 點 **Add Record** → 填入上述欄位
+4. Proxy status 先選 **DNS only**（灰色雲朵），等 SSL 設定完再考慮開啟
+
+### 3.4 驗證 DNS 生效
+
+```bash
+# 查詢 DNS 是否已指向你的 IP（通常 1-15 分鐘）
+dig +short wip.yourfactory.com
+# 應回傳你的靜態 IP
+
+# 或用 nslookup
+nslookup wip.yourfactory.com
+```
+
+> **沒有 dig？** macOS 內建，Linux 可裝 `sudo apt install dnsutils`。
 
 ## 4. VM 環境安裝
 

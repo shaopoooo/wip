@@ -103,7 +103,54 @@ GKE Autopilot + Cloud SQL HA + Memorystore Standard + Cloud Pub/Sub（IoT）+ Bi
 | 環境 | dev（本地）/ prod（雲端），Phase 2 加 staging |
 | 機密管理 | Phase 1~2 用 .env；Phase 3+ 用 Secret Manager |
 | 備份 | 每日自動備份 + 7 天保留 |
-| 域名 | 建議正式域名，如 `wip.yourfactory.com` |
+| 域名 | `wip.yfa.com.tw`（已購買，見下方網域管理） |
+
+## 網域管理
+
+### 網域資訊
+
+| 項目 | 內容 |
+|------|------|
+| 網域 | `yfa.com.tw` |
+| 註冊商 | 中華電信 HiNet |
+| 註冊管理後台 | https://domain.hinet.net/ |
+| 登入帳號 | 黃韶柏 / yfa.software@gmail.com |
+| DNS 代管 | Cloudflare（免費方案） |
+| Cloudflare 後台 | https://dash.cloudflare.com/ |
+
+### 子網域規劃
+
+| 子網域 | 用途 | 指向 |
+|--------|------|------|
+| `wip.yfa.com.tw` | WIP 追蹤系統（本專案） | GCP VM 靜態 IP |
+| `www.yfa.com.tw` | 公司官網（既有） | `219.84.199.61` |
+| `mail.yfa.com.tw` | 郵件伺服器（既有） | `59.125.185.104` |
+| `erp.yfa.com.tw` | 未來 ERP 擴充 | 待定 |
+
+### 架構說明
+
+```
+yfa.com.tw（中華電信購買）
+    │
+    │  Nameserver 指向 Cloudflare
+    ▼
+Cloudflare（DNS 代管）
+    ├─ wip.yfa.com.tw   → A record → GCP VM（34.81.60.163）
+    ├─ www.yfa.com.tw   → A record → 既有官網（219.84.199.61）
+    ├─ mail.yfa.com.tw  → A record → 既有郵件（59.125.185.104）
+    └─ MX / SPF         → 既有郵件設定（不要動）
+```
+
+**為什麼用 Cloudflare 代管 DNS：**
+- 網域仍在中華電信購買與續費，Cloudflare 只負責 DNS 解析
+- 免費方案即可，DNS 查詢速度快
+- 管理介面比 HiNet 後台友善，新增子網域方便
+- 未來可選擇性開啟 CDN、DDoS 防護、WAF 等功能
+
+**注意事項：**
+- Cloudflare 上既有的 `www`、`mail`、MX、TXT (SPF) 紀錄是公司官網和信箱用的，**不要刪除或修改**
+- 既有紀錄的 Proxy status 應設為 **DNS only**（灰色雲朵），避免影響原本服務
+- 新增 `wip` 子網域的 Proxy status 也先用 **DNS only**，SSL 設好再考慮開啟
 
 ## 資料表 / API / Phase 對照
 
