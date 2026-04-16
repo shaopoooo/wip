@@ -11,7 +11,8 @@
     "migrate:gen": "NODE_ENV=development drizzle-kit generate",
     "migrate": "NODE_ENV=development drizzle-kit migrate",
     "migrate:prod": "NODE_ENV=production node dist/migrate.js",
-    "seed": "NODE_ENV=development ts-node src/seed.ts"
+    "seed": "NODE_ENV=development ts-node src/seed.ts",
+    "seed:prod": "NODE_ENV=production node dist/seed.js"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",
