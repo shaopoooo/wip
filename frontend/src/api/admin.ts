@@ -286,9 +286,11 @@ export const productsApi = {
     fetch(`/api/products?department_id=${departmentId}`).then(r => r.json()).then(j => j.data as Product[]),
   create: (data: { departmentId: string; name: string; modelNumber: string; description?: string | null; categoryId?: string | null; routeId?: string | null }) =>
     post<Product>('/products', data),
-  update: (id: string, data: Partial<{ name: string; modelNumber: string; description: string | null; categoryId: string | null; routeId: string | null }>) =>
+  update: (id: string, data: Partial<{ name: string; modelNumber: string; description: string | null; categoryId: string | null; routeId: string | null; isActive: boolean }>) =>
     patch<Product>(`/products/${id}`, data),
   delete: (id: string) => del<null>(`/products/${id}`),
+  affectedOrders: (id: string) => get<{ items: { id: string; orderNumber: string; status: string }[]; total: number }>(`/products/${id}/affected-orders`),
+  resetAffectedOrders: (id: string) => post<{ resetCount: number }>(`/products/${id}/reset-affected-orders`, {}),
 }
 
 // ── Process Routes ────────────────────────────────────────────────────────────
@@ -361,6 +363,8 @@ export const workOrdersApi = {
     dueDate: string | null; note: string | null; productId: string
   }>) => patch<WorkOrder>(`/work-orders/${id}`, data),
   updateStatus: (id: string, status: string) => patch<WorkOrder>(`/work-orders/${id}/status`, { status }),
+  addManualLog: (id: string, data: { stationId: string; actualQtyIn?: number; actualQtyOut?: number; defectQty?: number }) =>
+    post<{ id: string }>(`/work-orders/${id}/manual-log`, data),
   qrcode: (id: string) => get<{ orderNumber: string; qrDataUrl: string; status: string }>(`/work-orders/${id}/qrcode`),
   print: (ids: string[]) => get<({ orderNumber: string; qrDataUrl: string; productName: string; modelNumber: string; plannedQty: number; orderQty: number | null; dueDate: string | null; priority: string })[]>(`/work-orders/print?ids=${ids.join(',')}`),
   split: (id: string, data: {

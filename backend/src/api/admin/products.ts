@@ -1,8 +1,8 @@
 import { Router } from 'express'
-import { SQL, and, eq, isNull, isNotNull, or } from 'drizzle-orm'
+import { SQL, and, asc, eq, inArray, isNull, isNotNull, or } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../../models/db'
-import { products, departments, productCategories, processRoutes } from '../../models/schema'
+import { products, departments, productCategories, processRoutes, workOrders, stationLogs, stations } from '../../models/schema'
 import { adminAuth } from '../../middleware/adminAuth'
 import { sendSuccess } from '../../utils/response'
 import { AppError, ErrorCode } from '../../utils/errors'
@@ -20,7 +20,9 @@ const ProductSchema = z.object({
   routeId: z.string().uuid().optional().nullable(),
 })
 
-const UpdateProductSchema = ProductSchema.partial().omit({ departmentId: true })
+const UpdateProductSchema = ProductSchema.partial().omit({ departmentId: true }).extend({
+  isActive: z.boolean().optional(),
+})
 
 async function assertRouteExists(routeId: string | null | undefined, next: Parameters<Parameters<typeof router.post>[1]>[2]): Promise<boolean> {
   if (!routeId) return true
@@ -154,6 +156,7 @@ router.patch('/:id', async (req, res, next) => {
     if (parsed.data.description !== undefined) updates['description'] = parsed.data.description
     if (parsed.data.categoryId !== undefined) updates['categoryId'] = parsed.data.categoryId
     if (parsed.data.routeId !== undefined) updates['routeId'] = parsed.data.routeId
+    if (parsed.data.isActive !== undefined) updates['isActive'] = parsed.data.isActive
 
     const [updated] = await db.update(products).set(updates).where(eq(products.id, id)).returning()
     if (!updated) return next(new AppError(ErrorCode.NOT_FOUND, '產品不存在', 404))
@@ -176,6 +179,93 @@ router.delete('/:id', async (req, res, next) => {
 
     if (!updated) return next(new AppError(ErrorCode.NOT_FOUND, '產品不存在', 404))
     sendSuccess(res, null)
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /api/admin/products/:id/affected-orders — work orders with logs that would be affected by route change
+const ACTIVE_STATUSES = ['in_progress', 'manual_tracking', 'ready_to_ship']
+
+router.get('/:id/affected-orders', async (req, res, next) => {
+  try {
+    const { id } = req.params as { id: string }
+
+    const rows = await db
+      .select({ id: workOrders.id, orderNumber: workOrders.orderNumber, status: workOrders.status })
+      .from(workOrders)
+      .where(and(
+        eq(workOrders.productId, id),
+        inArray(workOrders.status, ACTIVE_STATUSES),
+      ))
+      .orderBy(workOrders.orderNumber)
+
+    // Filter to only those with at least one station log
+    const withLogs = []
+    for (const wo of rows) {
+      const [logRow] = await db
+        .select({ id: stationLogs.id })
+        .from(stationLogs)
+        .where(eq(stationLogs.workOrderId, wo.id))
+        .limit(1)
+      if (logRow) withLogs.push(wo)
+    }
+
+    sendSuccess(res, { items: withLogs, total: withLogs.length })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// POST /api/admin/products/:id/reset-affected-orders — archive logs to note and clear them
+router.post('/:id/reset-affected-orders', async (req, res, next) => {
+  try {
+    const { id } = req.params as { id: string }
+
+    const rows = await db
+      .select({ id: workOrders.id, orderNumber: workOrders.orderNumber, status: workOrders.status, note: workOrders.note })
+      .from(workOrders)
+      .where(and(
+        eq(workOrders.productId, id),
+        inArray(workOrders.status, ACTIVE_STATUSES),
+      ))
+
+    let resetCount = 0
+    for (const wo of rows) {
+      // Get existing logs
+      const logs = await db
+        .select({
+          stationName: stations.name,
+          stationCode: stations.code,
+          status: stationLogs.status,
+          checkInTime: stationLogs.checkInTime,
+          checkOutTime: stationLogs.checkOutTime,
+          actualQtyIn: stationLogs.actualQtyIn,
+          actualQtyOut: stationLogs.actualQtyOut,
+        })
+        .from(stationLogs)
+        .innerJoin(stations, eq(stationLogs.stationId, stations.id))
+        .where(eq(stationLogs.workOrderId, wo.id))
+        .orderBy(asc(stationLogs.checkInTime))
+
+      if (logs.length === 0) continue
+
+      // Format logs as text for note
+      const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })
+      const fmt = (iso: Date | null) => iso ? new Date(iso).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '—'
+      const logLines = logs.map((l, i) =>
+        `  ${i + 1}. ${l.stationName}${l.stationCode ? `(${l.stationCode})` : ''} | ${l.status} | 入站 ${fmt(l.checkInTime)} | 出站 ${fmt(l.checkOutTime)} | 入${l.actualQtyIn ?? '—'} 出${l.actualQtyOut ?? '—'}`
+      ).join('\n')
+      const archiveNote = `\n\n── 製程變更前歷程備份（${now}）──\n${logLines}`
+      const newNote = (wo.note || '') + archiveNote
+
+      // Update note + clear logs
+      await db.update(workOrders).set({ note: newNote, updatedAt: new Date() }).where(eq(workOrders.id, wo.id))
+      await db.delete(stationLogs).where(eq(stationLogs.workOrderId, wo.id))
+      resetCount++
+    }
+
+    sendSuccess(res, { resetCount })
   } catch (err) {
     next(err)
   }

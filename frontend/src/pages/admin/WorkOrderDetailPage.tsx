@@ -4,7 +4,7 @@ import { workOrdersApi, routesApi, WorkOrderDetail, ProcessStep } from '../../ap
 import { SplitModal } from '../../components/SplitModal'
 
 const STATUS_LABEL: Record<string, string> = {
-  pending: '待開工', in_progress: '進行中', completed: '已完工', cancelled: '已取消', split: '已拆單',
+  pending: '待開工', in_progress: '進行中', manual_tracking: '人工追蹤', ready_to_ship: '待出貨', completed: '已完工', cancelled: '已取消', split: '已拆單',
 }
 const LOG_STATUS: Record<string, string> = {
   in_progress: '作業中', completed: '已完成', auto_filled: '自動補填', abnormal: '異常', split: '拆單結轉',
@@ -35,7 +35,7 @@ export function WorkOrderDetailPage() {
   const [splitOpen, setSplitOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
-  // printRef reserved for Phase 2 print feature
+  const [shipOpen, setShipOpen] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -77,6 +77,24 @@ export function WorkOrderDetailPage() {
   }
 
   const handleSplitSuccess = () => reload()
+
+  const handleManualLog = async (stationId: string, stationName: string, stepOrder: number) => {
+    if (!id || !detail) return
+    // Count how many preceding steps are uncompleted
+    const uncompleted = routeSteps.filter(s =>
+      s.stepOrder < stepOrder && !completedStationIds.has(s.stationName)
+    )
+    const autoFillMsg = uncompleted.length > 0
+      ? `\n\n前方有 ${uncompleted.length} 個未完成站點（${uncompleted.map(s => s.stationName).join('、')}）將一併自動補填。`
+      : ''
+    if (!confirm(`確定為「${stationName}」新增已完成紀錄？${autoFillMsg}`)) return
+    try {
+      await workOrdersApi.addManualLog(id, { stationId })
+      reload()
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : '新增失敗')
+    }
+  }
 
   const handlePrint = () => {
     if (!detail || !qr) return
@@ -178,9 +196,11 @@ export function WorkOrderDetailPage() {
   }
 
   const { workOrder: wo, product, route, logs } = detail
-  // Build a set of completed station IDs for route step progress overlay
+  const canManualLog = wo.status === 'manual_tracking'
+  // Build a set of completed station names for route step progress overlay
   const completedStationIds = new Set(logs.filter(l => l.status === 'completed' || l.status === 'auto_filled').map(l => l.stationName))
   const inProgressStationNames = new Set(logs.filter(l => l.status === 'in_progress').map(l => l.stationName))
+  const allStepsDone = routeSteps.length > 0 && routeSteps.every(s => completedStationIds.has(s.stationName))
 
   return (
     <div className="p-6 max-w-4xl">
@@ -216,6 +236,8 @@ export function WorkOrderDetailPage() {
               <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
                 wo.status === 'completed' ? 'bg-emerald-100 text-emerald-700'
                 : wo.status === 'in_progress' ? 'bg-blue-100 text-blue-700'
+                : wo.status === 'manual_tracking' ? 'bg-violet-100 text-violet-700'
+                : wo.status === 'ready_to_ship' ? 'bg-orange-100 text-orange-700'
                 : wo.status === 'cancelled' ? 'bg-red-100 text-red-600'
                 : 'bg-slate-100 text-slate-600'
               }`}>
@@ -283,29 +305,89 @@ export function WorkOrderDetailPage() {
           {/* Route steps progress */}
           {routeSteps.length > 0 && (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2 flex-wrap">
                 <h2 className="font-semibold text-slate-800">預計製程（{routeSteps.length} 步驟）</h2>
+                <div className="flex items-center gap-2">
+                  {canManualLog && <span className="text-xs text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full font-medium">點擊未完成站點新增歷程</span>}
+                  {!['completed', 'cancelled', 'split', 'ready_to_ship'].includes(wo.status) && (
+                    wo.status !== 'manual_tracking' ? (
+                      <button
+                        onClick={() => {
+                          if (confirm('切換為「人工追蹤」後，可直接點選製程站點新增歷程。確定切換？')) {
+                            handleStatusChange('manual_tracking')
+                          }
+                        }}
+                        disabled={statusChanging}
+                        className="border border-violet-300 text-violet-600 hover:bg-violet-50 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        切為人工追蹤
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          if (confirm('確定切回「進行中」？切回後需透過掃描 QR Code 報工。')) {
+                            handleStatusChange('in_progress')
+                          }
+                        }}
+                        disabled={statusChanging}
+                        className="border border-blue-300 text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        切回進行中
+                      </button>
+                    )
+                  )}
+                  {allStepsDone && !['completed', 'cancelled', 'split', 'ready_to_ship'].includes(wo.status) && (
+                    <button
+                      onClick={() => {
+                        if (confirm('所有站點已完成，確定將工單設為「待出貨」？')) {
+                          handleStatusChange('ready_to_ship')
+                        }
+                      }}
+                      disabled={statusChanging}
+                      className="border border-orange-400 text-orange-700 hover:bg-orange-50 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      設為待出貨
+                    </button>
+                  )}
+                  {wo.status === 'ready_to_ship' && (
+                    <button
+                      onClick={() => setShipOpen(true)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      出貨
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="flex flex-wrap gap-2 p-4">
                 {routeSteps.map((step, i) => {
                   const done = completedStationIds.has(step.stationName)
                   const active = inProgressStationNames.has(step.stationName)
+                  const canClick = canManualLog && !done
                   return (
                     <div key={step.id} className="flex items-center gap-1">
-                      <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium ${
-                        done ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                        : active ? 'bg-blue-50 border-blue-300 text-blue-700'
-                        : 'bg-slate-50 border-slate-200 text-slate-500'
-                      }`}>
+                      <button
+                        type="button"
+                        disabled={!canClick}
+                        onClick={() => canClick && handleManualLog(step.stationId, step.stationName, step.stepOrder)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                          done ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                          : active ? 'bg-blue-50 border-blue-300 text-blue-700'
+                          : canClick ? 'bg-violet-50 border-violet-300 text-violet-700 hover:bg-violet-100 cursor-pointer'
+                          : 'bg-slate-50 border-slate-200 text-slate-500'
+                        } ${!canClick ? 'cursor-default' : ''}`}
+                      >
                         <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
                           done ? 'bg-emerald-500 text-white'
                           : active ? 'bg-blue-500 text-white'
+                          : canClick ? 'bg-violet-500 text-white'
                           : 'bg-slate-300 text-slate-600'
                         }`}>{step.stepOrder}</span>
                         <span>{step.stationName}</span>
                         {done && <span className="text-emerald-600">✓</span>}
                         {active && <span className="text-blue-500 animate-pulse">●</span>}
-                      </div>
+                        {canClick && !done && !active && <span className="text-violet-400">+</span>}
+                      </button>
                       {i < routeSteps.length - 1 && <span className="text-slate-300 text-xs">→</span>}
                     </div>
                   )
@@ -404,6 +486,17 @@ export function WorkOrderDetailPage() {
               </div>
             </div>
           )}
+
+          {/* Ship modal */}
+          {shipOpen && (
+            <ShipModal
+              workOrderId={wo.id}
+              orderNumber={wo.orderNumber}
+              existingNote={wo.note ?? ''}
+              onClose={() => setShipOpen(false)}
+              onShipped={() => { setShipOpen(false); reload() }}
+            />
+          )}
       </div>
     </div>
   )
@@ -414,6 +507,63 @@ function InfoRow({ label, value }: { label: string; value: string }) {
     <div>
       <p className="text-slate-500 text-xs">{label}</p>
       <p className="text-slate-800 font-medium mt-0.5">{value}</p>
+    </div>
+  )
+}
+
+// ── Ship Modal ───────────────────────────────────────────────────────────────
+
+function ShipModal({ workOrderId, orderNumber, existingNote, onClose, onShipped }: {
+  workOrderId: string; orderNumber: string; existingNote: string
+  onClose: () => void; onShipped: () => void
+}) {
+  const [report, setReport] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleShip = async () => {
+    if (!report.trim()) { setError('請填寫出貨報告'); return }
+    setSaving(true)
+    setError(null)
+    try {
+      const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })
+      const shipNote = `\n\n── 出貨報告（${now}）──\n${report.trim()}`
+      const newNote = (existingNote || '') + shipNote
+      await workOrdersApi.update(workOrderId, { note: newNote })
+      await workOrdersApi.updateStatus(workOrderId, 'completed')
+      onShipped()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '出貨失敗')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+        <h2 className="font-bold text-emerald-700 text-lg">出貨確認 — {orderNumber}</h2>
+        <p className="text-sm text-slate-600">填寫出貨報告後，工單將設為「已完工」。報告內容會附加在工單備註後方。</p>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">出貨報告</label>
+          <textarea
+            value={report}
+            onChange={e => setReport(e.target.value)}
+            rows={5}
+            placeholder="出貨數量、收件人、物流方式、備註..."
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
+          />
+        </div>
+        {error && <p className="text-red-600 text-sm">{error}</p>}
+        <div className="flex gap-3 pt-2">
+          <button onClick={onClose} className="flex-1 border border-slate-300 text-slate-600 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-colors cursor-pointer">
+            取消
+          </button>
+          <button onClick={handleShip} disabled={saving} className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors cursor-pointer">
+            {saving ? '處理中...' : '確認出貨'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

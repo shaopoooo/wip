@@ -3,7 +3,7 @@ import { and, asc, count, desc, eq, ilike, isNotNull, isNull, like, or, SQL } fr
 import { z } from 'zod'
 import QRCode from 'qrcode'
 import { db } from '../../models/db'
-import { workOrders, products, processRoutes, departments, stationLogs, stations } from '../../models/schema'
+import { workOrders, products, processRoutes, processSteps, departments, stationLogs, stations, devices } from '../../models/schema'
 import { adminAuth } from '../../middleware/adminAuth'
 import { sendSuccess } from '../../utils/response'
 import { AppError, ErrorCode } from '../../utils/errors'
@@ -292,8 +292,10 @@ router.patch('/:id', async (req, res, next) => {
 
 // ── Work order state machine ──────────────────────────────────────────────────
 const STATUS_TRANSITIONS: Record<string, string[]> = {
-  pending: ['in_progress', 'cancelled'],
-  in_progress: ['completed', 'cancelled'],
+  pending: ['in_progress', 'manual_tracking', 'cancelled'],
+  in_progress: ['completed', 'manual_tracking', 'ready_to_ship', 'cancelled'],
+  manual_tracking: ['in_progress', 'ready_to_ship', 'completed', 'cancelled'],
+  ready_to_ship: ['completed', 'cancelled'],
   // completed, cancelled, split → 不允許轉換
 }
 
@@ -305,7 +307,7 @@ router.patch('/:id/status', async (req, res, next) => {
 
     const { status } = req.body as { status?: string }
 
-    const allStatuses = ['pending', 'in_progress', 'completed', 'cancelled']
+    const allStatuses = ['pending', 'in_progress', 'manual_tracking', 'ready_to_ship', 'completed', 'cancelled']
     if (!status || !allStatuses.includes(status)) {
       return next(new AppError(ErrorCode.VALIDATION_ERROR, `status 必須是 ${allStatuses.join(' / ')}`))
     }
@@ -414,6 +416,117 @@ router.get('/print', async (req, res, next) => {
     )
 
     sendSuccess(res, results.filter(Boolean))
+  } catch (err) {
+    next(err)
+  }
+})
+
+// POST /api/admin/work-orders/:id/manual-log  — manually add a station log entry
+const ManualLogSchema = z.object({
+  stationId: z.string().uuid(),
+  actualQtyIn: z.number().int().optional(),
+  actualQtyOut: z.number().int().optional(),
+  defectQty: z.number().int().min(0).optional(),
+})
+
+/** Get or create a system device for manual tracking */
+async function getSystemDeviceId(departmentId: string): Promise<string> {
+  const [existing] = await db
+    .select({ id: devices.id })
+    .from(devices)
+    .where(and(eq(devices.name, '__SYSTEM__'), eq(devices.departmentId, departmentId)))
+    .limit(1)
+  if (existing) return existing.id
+
+  const [created] = await db
+    .insert(devices)
+    .values({ departmentId, name: '__SYSTEM__', deviceType: 'scanner' })
+    .returning({ id: devices.id })
+  return created!.id
+}
+
+router.post('/:id/manual-log', async (req, res, next) => {
+  try {
+    const woId = await resolveWoId(req.params['id'] as string)
+    if (!woId) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
+
+    const [wo] = await db
+      .select({ id: workOrders.id, departmentId: workOrders.departmentId, routeId: workOrders.routeId, plannedQty: workOrders.plannedQty, status: workOrders.status })
+      .from(workOrders)
+      .where(eq(workOrders.id, woId))
+      .limit(1)
+
+    if (!wo) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
+    if (wo.status !== 'manual_tracking') {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, '此工單必須為「人工追蹤」狀態才能手動新增紀錄'))
+    }
+    if (!wo.routeId) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, '此工單尚未設定製程路由'))
+    }
+
+    const parsed = ManualLogSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid body'))
+    }
+
+    const { stationId, actualQtyIn, actualQtyOut, defectQty } = parsed.data
+
+    // Get all route steps in order
+    const allSteps = await db
+      .select({ id: processSteps.id, stationId: processSteps.stationId, stepOrder: processSteps.stepOrder })
+      .from(processSteps)
+      .where(eq(processSteps.routeId, wo.routeId))
+      .orderBy(asc(processSteps.stepOrder))
+
+    // Find the target step
+    const targetStep = allSteps.find(s => s.stationId === stationId)
+    if (!targetStep) return next(new AppError(ErrorCode.VALIDATION_ERROR, '此站點不在工單的製程路由中'))
+
+    // Get existing completed logs for this work order
+    const existingLogs = await db
+      .select({ stationId: stationLogs.stationId })
+      .from(stationLogs)
+      .where(and(
+        eq(stationLogs.workOrderId, woId),
+        eq(stationLogs.status, 'completed'),
+      ))
+    const completedStationIds = new Set(existingLogs.map(l => l.stationId))
+
+    // Find all steps up to and including target that are not yet completed
+    const stepsToFill = allSteps
+      .filter(s => s.stepOrder <= targetStep.stepOrder && !completedStationIds.has(s.stationId))
+
+    if (stepsToFill.length === 0) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, '此站點已完成'))
+    }
+
+    const systemDeviceId = await getSystemDeviceId(wo.departmentId)
+    const now = new Date()
+    const qtyIn = actualQtyIn ?? wo.plannedQty
+    const defect = defectQty ?? 0
+
+    const createdLogs = []
+    for (const step of stepsToFill) {
+      const isTarget = step.id === targetStep.id
+      const [log] = await db
+        .insert(stationLogs)
+        .values({
+          workOrderId: woId,
+          stationId: step.stationId,
+          deviceId: systemDeviceId,
+          stepId: step.id,
+          checkInTime: now,
+          checkOutTime: now,
+          actualQtyIn: qtyIn,
+          actualQtyOut: isTarget ? (actualQtyOut ?? (qtyIn - defect)) : qtyIn,
+          defectQty: isTarget ? defect : 0,
+          status: 'completed',
+        })
+        .returning()
+      createdLogs.push(log!)
+    }
+
+    sendSuccess(res, { logs: createdLogs, autoFilledCount: stepsToFill.length - 1 }, 201)
   } catch (err) {
     next(err)
   }

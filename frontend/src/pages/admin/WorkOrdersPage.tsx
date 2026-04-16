@@ -7,6 +7,8 @@ import { TableControls } from '../../components/TableControls'
 const STATUS_LABEL: Record<string, string> = {
   pending: '待開工',
   in_progress: '進行中',
+  manual_tracking: '人工追蹤',
+  ready_to_ship: '待出貨',
   completed: '已完工',
   cancelled: '已取消',
   split: '已拆單',
@@ -15,6 +17,8 @@ const STATUS_LABEL: Record<string, string> = {
 const STATUS_COLOR: Record<string, string> = {
   pending: 'bg-slate-100 text-slate-600',
   in_progress: 'bg-blue-100 text-blue-700',
+  manual_tracking: 'bg-violet-100 text-violet-700',
+  ready_to_ship: 'bg-orange-100 text-orange-700',
   completed: 'bg-emerald-100 text-emerald-700',
   cancelled: 'bg-red-100 text-red-600',
   split: 'bg-amber-100 text-amber-700',

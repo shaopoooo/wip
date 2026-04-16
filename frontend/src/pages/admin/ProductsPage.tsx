@@ -195,7 +195,10 @@ function ProductsTable({ deptId, depts, selectedDept, onDeptChange, showModal, s
                 </td>
                 <td className="px-4 py-3 text-right space-x-3">
                   <button onClick={() => { setEditing(item); setShowModal(true) }} className="text-blue-600 hover:text-blue-800 text-xs font-medium cursor-pointer">編輯</button>
-                  {item.isActive && <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:text-red-700 text-xs font-medium cursor-pointer">停用</button>}
+                  {item.isActive
+                    ? <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:text-red-700 text-xs font-medium cursor-pointer">停用</button>
+                    : <button onClick={async () => { await productsApi.update(item.id, { isActive: true }); void load() }} className="text-emerald-600 hover:text-emerald-800 text-xs font-medium cursor-pointer">啟用</button>
+                  }
                 </td>
               </tr>
             ))}
@@ -222,6 +225,7 @@ function ProductsTable({ deptId, depts, selectedDept, onDeptChange, showModal, s
           isTemplate={templates.some(t => t.id === stepsProduct.routeId)}
           deptId={deptId}
           templates={templates}
+          productId={stepsProduct.id}
           onClose={() => { setStepsProduct(null); void load() }}
         />
       )}
@@ -302,6 +306,7 @@ function ProductModal({ depts, defaultDeptId, product, templates, deptId: parent
         isTemplate={templates.some(t => t.id === savedRouteId)}
         deptId={parentDeptId}
         templates={templates}
+        productId={product?.id}
         onClose={() => onSaved()}
       />
     )
@@ -366,9 +371,9 @@ function ProductModal({ depts, defaultDeptId, product, templates, deptId: parent
 
 // ── Steps Modal ────────────────────────────────────────────────────────────────
 
-function StepsModal({ routeId, routeName, isTemplate: _isTemplate, deptId, templates, onClose }: {
+function StepsModal({ routeId, routeName, isTemplate: _isTemplate, deptId, templates, productId, onClose }: {
   routeId: string; routeName: string; isTemplate: boolean
-  deptId: string; templates: ProcessRoute[]; onClose: () => void
+  deptId: string; templates: ProcessRoute[]; productId?: string; onClose: () => void
 }) {
   const [steps, setSteps] = useState<ProcessStep[]>([])
   const [stations, setStations] = useState<Station[]>([])
@@ -596,6 +601,19 @@ function StepsModal({ routeId, routeName, isTemplate: _isTemplate, deptId, templ
     setSaving(true)
     setError(null)
     try {
+      // Check affected work orders before saving
+      if (isDirty && productId) {
+        const { items: affected } = await productsApi.affectedOrders(productId)
+        if (affected.length > 0) {
+          const orderList = affected.map(o => o.orderNumber).join('、')
+          const ok = confirm(
+            `此製程變更將影響 ${affected.length} 張進行中的工單：\n\n${orderList}\n\n這些工單的站點歷程將被備份至備註並清除。確定繼續？`
+          )
+          if (!ok) { setSaving(false); return }
+          await productsApi.resetAffectedOrders(productId)
+        }
+      }
+
       // sync route name to match model number
       await routesApi.update(routeId, { name: routeName })
 
