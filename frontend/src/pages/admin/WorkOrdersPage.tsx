@@ -26,6 +26,7 @@ export function WorkOrdersPage() {
   const [depts, setDepts] = useState<Department[]>([])
   const [selectedDept, setSelectedDept] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [routeFilter, setRouteFilter] = useState('')
   const [showCreate, setShowCreate] = useState(false)
 
   useEffect(() => {
@@ -43,15 +44,17 @@ export function WorkOrdersPage() {
         ...st.params,
         departmentId: selectedDept,
         status: statusFilter || undefined,
+        routeFilter: routeFilter || undefined,
       })
       st.setData(result.items, result.total)
     } catch { } finally { st.setLoading(false) }
-  }, [st.params, selectedDept, statusFilter]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [st.params, selectedDept, statusFilter, routeFilter]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { void load() }, [load])
 
   const handleDeptChange = (val: string) => { setSelectedDept(val); st.setPage(1) }
   const handleStatusChange = (val: string) => { setStatusFilter(val); st.setPage(1) }
+  const handleRouteFilterChange = (val: string) => { setRouteFilter(val); st.setPage(1) }
 
   return (
     <div className="p-6">
@@ -73,6 +76,11 @@ export function WorkOrdersPage() {
         <select value={statusFilter} onChange={e => handleStatusChange(e.target.value)} className={SELECT_CLS} style={{ maxWidth: 140 }}>
           <option value="">全部狀態</option>
           {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select value={routeFilter} onChange={e => handleRouteFilterChange(e.target.value)} className={SELECT_CLS} style={{ maxWidth: 140 }}>
+          <option value="">全部製程</option>
+          <option value="set">已設定製程</option>
+          <option value="unset">未設定製程</option>
         </select>
       </div>
 

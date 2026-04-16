@@ -343,10 +343,11 @@ export interface SplitResult {
 }
 
 export const workOrdersApi = {
-  list: (p: TableQuery & { departmentId: string; status?: string }) => {
+  list: (p: TableQuery & { departmentId: string; status?: string; routeFilter?: string }) => {
     const q = buildTableQuery(p)
     q.set('department_id', p.departmentId)
     if (p.status) q.set('status', p.status)
+    if (p.routeFilter) q.set('route_filter', p.routeFilter)
     return get<Paged<WorkOrderRow>>(`/work-orders?${q}`)
   },
   get: (id: string) => get<WorkOrderDetail>(`/work-orders/${id}`),

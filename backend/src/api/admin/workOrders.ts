@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { and, asc, count, desc, eq, ilike, like, or, SQL } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, isNotNull, isNull, like, or, SQL } from 'drizzle-orm'
 import { z } from 'zod'
 import QRCode from 'qrcode'
 import { db } from '../../models/db'
@@ -52,11 +52,12 @@ async function generateOrderNumber(_deptCode: string): Promise<string> {
   return `${prefix}${String(seq).padStart(3, '0')}`
 }
 
-// GET /api/admin/work-orders?department_id=&status=&search=&sort_by=&sort_dir=&page=&limit=
+// GET /api/admin/work-orders?department_id=&status=&route_filter=&search=&sort_by=&sort_dir=&page=&limit=
 router.get('/', async (req, res, next) => {
   try {
     const departmentId = req.query['department_id'] as string | undefined
     const status = req.query['status'] as string | undefined
+    const routeFilter = req.query['route_filter'] as string | undefined  // 'set' | 'unset'
     const search = (req.query['search'] as string | undefined)?.trim()
     const sortBy = req.query['sort_by'] as string | undefined
     const sortDir = req.query['sort_dir'] === 'asc' ? 'asc' : 'desc'
@@ -70,6 +71,8 @@ router.get('/', async (req, res, next) => {
 
     const conditions: SQL[] = [eq(workOrders.departmentId, departmentId)]
     if (status) conditions.push(eq(workOrders.status, status))
+    if (routeFilter === 'set') conditions.push(isNotNull(workOrders.routeId))
+    if (routeFilter === 'unset') conditions.push(isNull(workOrders.routeId))
     if (search) {
       const pattern = `%${search}%`
       conditions.push(or(
