@@ -442,8 +442,31 @@ function StepsModal({ routeId, routeName, isTemplate: _isTemplate, deptId, templ
 
   const handleAdd = async () => {
     if (!addStationId) return
-    const nextOrder = steps.length > 0 ? Math.max(...steps.map(s => s.stepOrder)) + 1 : 1
+    const visibleSteps = steps.filter(s => !deletedIds.has(s.id))
+    const nextOrder = visibleSteps.length > 0 ? Math.max(...visibleSteps.map(s => s.stepOrder)) + 1 : 1
     setError(null)
+
+    // If there are pending (unsaved) steps, add locally to avoid reload wiping them
+    if (pendingAdds.size > 0) {
+      const tempId = `pending-${crypto.randomUUID()}`
+      const station = stations.find(s => s.id === addStationId)
+      const newStep: ProcessStep = {
+        id: tempId,
+        routeId,
+        stationId: addStationId,
+        stationName: station?.name ?? '',
+        stationCode: station?.code ?? null,
+        stepOrder: nextOrder,
+        standardTime: addStdTime ? Number(addStdTime) : null,
+        createdAt: new Date().toISOString(),
+      }
+      setSteps(prev => [...prev, newStep])
+      setNewIds(prev => new Set(prev).add(tempId))
+      setPendingAdds(prev => new Set(prev).add(tempId))
+      setAddStdTime('')
+      return
+    }
+
     try {
       await routesApi.addStep(routeId, {
         stationId: addStationId, stepOrder: nextOrder,
@@ -520,7 +543,7 @@ function StepsModal({ routeId, routeName, isTemplate: _isTemplate, deptId, templ
           stationCode: station?.code ?? s.stationCode,
           stepOrder: i + 1,
           standardTime: s.standardTime,
-          isOptional: false,
+
           createdAt: new Date().toISOString(),
         }
       })
@@ -555,7 +578,7 @@ function StepsModal({ routeId, routeName, isTemplate: _isTemplate, deptId, templ
           stationCode: station?.code ?? s.stationCode,
           stepOrder: maxOrder + i + 1,
           standardTime: s.standardTime,
-          isOptional: false,
+
           createdAt: new Date().toISOString(),
         }
       })
