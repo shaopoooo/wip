@@ -47,9 +47,12 @@ router.get('/', async (req, res, next) => {
 
     const conditions: SQL[] = [eq(products.departmentId, departmentId)]
 
-    if (isActiveParam !== 'all') {
-      conditions.push(eq(products.isActive, isActiveParam !== 'false'))
+    if (isActiveParam === 'true') {
+      conditions.push(eq(products.isActive, true))
+    } else if (isActiveParam === 'false') {
+      conditions.push(eq(products.isActive, false))
     }
+    // no isActiveParam → show all
 
     if (categoryIdParam) {
       conditions.push(eq(products.categoryId, categoryIdParam))
