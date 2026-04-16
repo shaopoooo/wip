@@ -17,7 +17,8 @@ async function runMigrations() {
   const pool = new Pool({ connectionString: process.env['DATABASE_URL'] })
   const db = drizzle(pool)
 
-  const migrationsFolder = path.resolve(__dirname, '../../migrations')
+  const migrationsFolder = process.env['MIGRATIONS_PATH']
+    || path.resolve(__dirname, '../../migrations')
   console.log(`[migrate] Applying migrations from ${migrationsFolder}`)
 
   await migrate(db, { migrationsFolder })
