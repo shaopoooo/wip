@@ -526,6 +526,17 @@ router.post('/:id/manual-log', async (req, res, next) => {
       createdLogs.push(log!)
     }
 
+    // Check if all steps are now completed → auto set ready_to_ship
+    const doneCheckLogs = await db
+      .select({ stationId: stationLogs.stationId })
+      .from(stationLogs)
+      .where(and(eq(stationLogs.workOrderId, woId), eq(stationLogs.status, 'completed')))
+    const doneStationIds = new Set(doneCheckLogs.map(l => l.stationId))
+    const allDone = allSteps.every(s => doneStationIds.has(s.stationId))
+    if (allDone) {
+      await db.update(workOrders).set({ status: 'ready_to_ship', updatedAt: new Date() }).where(eq(workOrders.id, woId))
+    }
+
     sendSuccess(res, { logs: createdLogs, autoFilledCount: stepsToFill.length - 1 }, 201)
   } catch (err) {
     next(err)

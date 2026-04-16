@@ -246,7 +246,7 @@ export class ScanService {
     if (isLastStep) {
       await tx
         .update(workOrders)
-        .set({ status: 'completed', updatedAt: now })
+        .set({ status: 'ready_to_ship', updatedAt: now })
         .where(eq(workOrders.id, wo.id))
     }
 

@@ -200,7 +200,6 @@ export function WorkOrderDetailPage() {
   // Build a set of completed station names for route step progress overlay
   const completedStationIds = new Set(logs.filter(l => l.status === 'completed' || l.status === 'auto_filled').map(l => l.stationName))
   const inProgressStationNames = new Set(logs.filter(l => l.status === 'in_progress').map(l => l.stationName))
-  const allStepsDone = routeSteps.length > 0 && routeSteps.every(s => completedStationIds.has(s.stationName))
 
   return (
     <div className="p-6 max-w-4xl">
@@ -335,19 +334,6 @@ export function WorkOrderDetailPage() {
                         切回進行中
                       </button>
                     )
-                  )}
-                  {allStepsDone && !['completed', 'cancelled', 'split', 'ready_to_ship'].includes(wo.status) && (
-                    <button
-                      onClick={() => {
-                        if (confirm('所有站點已完成，確定將工單設為「待出貨」？')) {
-                          handleStatusChange('ready_to_ship')
-                        }
-                      }}
-                      disabled={statusChanging}
-                      className="border border-orange-400 text-orange-700 hover:bg-orange-50 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      設為待出貨
-                    </button>
                   )}
                   {wo.status === 'ready_to_ship' && (
                     <button
