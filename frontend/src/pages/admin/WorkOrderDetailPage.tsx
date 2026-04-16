@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { workOrdersApi, routesApi, WorkOrderDetail, ProcessStep } from '../../api/admin'
 import { SplitModal } from '../../components/SplitModal'
@@ -35,7 +35,7 @@ export function WorkOrderDetailPage() {
   const [splitOpen, setSplitOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
-  const printRef = useRef<HTMLDivElement>(null)
+  // printRef reserved for Phase 2 print feature
 
   useEffect(() => {
     if (!id) return

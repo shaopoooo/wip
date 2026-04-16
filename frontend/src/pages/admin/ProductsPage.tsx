@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  productsApi, routesApi, stationsApi, categoriesApi, departmentsApi,
-  Product, ProductCategory, ProcessRoute, ProcessStep, Station, Department,
+  productsApi, routesApi, stationsApi, departmentsApi,
+  Product, ProcessRoute, ProcessStep, Station, Department,
   TemplateType, TEMPLATE_TYPE_LABELS,
 } from '../../api/admin'
 import { useServerTable } from '../../hooks/useServerTable'
@@ -10,7 +10,6 @@ import { TableControls, SortTh } from '../../components/TableControls'
 export function ProductsPage() {
   const [depts, setDepts] = useState<Department[]>([])
   const [selectedDept, setSelectedDept] = useState('')
-  const [categories, setCategories] = useState<ProductCategory[]>([])
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Product | null>(null)
   const [showTemplateManager, setShowTemplateManager] = useState(false)
@@ -21,7 +20,7 @@ export function ProductsPage() {
       setDepts(d)
       if (d.length > 0) setSelectedDept(d[0]!.id)
     }).catch(() => { })
-    categoriesApi.listAll().then(setCategories).catch(() => { })
+    // categoriesApi.listAll() — 功能保留，UI 隱藏，啟用時取消註解
   }, [])
 
   return (
@@ -49,7 +48,6 @@ export function ProductsPage() {
           key={reloadKey}
           deptId={selectedDept}
           depts={depts}
-          categories={categories}
           selectedDept={selectedDept}
           onDeptChange={setSelectedDept}
           showModal={showModal}
@@ -72,8 +70,8 @@ export function ProductsPage() {
 
 // ── Products Table ─────────────────────────────────────────────────────────────
 
-function ProductsTable({ deptId, depts, categories, selectedDept, onDeptChange, showModal, setShowModal, editing, setEditing }: {
-  deptId: string; depts: Department[]; categories: ProductCategory[]
+function ProductsTable({ deptId, depts, selectedDept, onDeptChange, showModal, setShowModal, editing, setEditing }: {
+  deptId: string; depts: Department[]
   selectedDept: string; onDeptChange: (id: string) => void
   showModal: boolean; setShowModal: (v: boolean) => void
   editing: Product | null; setEditing: (p: Product | null) => void
@@ -82,7 +80,7 @@ function ProductsTable({ deptId, depts, categories, selectedDept, onDeptChange, 
   const [stepsProduct, setStepsProduct] = useState<Product | null>(null)
   const [templates, setTemplates] = useState<ProcessRoute[]>([])
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active')
-  const [categoryFilter, setCategoryFilter] = useState('')
+  const [categoryFilter] = useState('')
   const [routeFilter, setRouteFilter] = useState<'all' | 'set' | 'unset'>('all')
   const [unsetCount, setUnsetCount] = useState(0)
 
@@ -108,7 +106,6 @@ function ProductsTable({ deptId, depts, categories, selectedDept, onDeptChange, 
   useEffect(() => { void load() }, [load])
 
   const handleStatusChange = (val: string) => { setStatusFilter(val as typeof statusFilter); st.setPage(1) }
-  const handleCategoryChange = (val: string) => { setCategoryFilter(val); st.setPage(1) }
   const handleRouteFilterChange = (val: string) => { setRouteFilter(val as typeof routeFilter); st.setPage(1) }
 
   const handleDelete = async (id: string) => {
@@ -137,12 +134,7 @@ function ProductsTable({ deptId, depts, categories, selectedDept, onDeptChange, 
           <option value="active">啟用中</option>
           <option value="inactive">已停用</option>
         </select>
-        {/* 產品種類篩選（功能保留，UI 隱藏）
-        <select value={categoryFilter} onChange={e => handleCategoryChange(e.target.value)} className={SELECT_CLS}>
-          <option value="">全部種類</option>
-          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-        */}
+        {/* 產品種類篩選（功能保留，UI 隱藏）— 啟用時取消註解並加回 handleCategoryChange */}
         <select value={routeFilter} onChange={e => handleRouteFilterChange(e.target.value)} className={SELECT_CLS}>
           <option value="all">全部製程</option>
           <option value="set">已設定製程</option>
@@ -216,7 +208,6 @@ function ProductsTable({ deptId, depts, categories, selectedDept, onDeptChange, 
           depts={depts}
           defaultDeptId={deptId}
           product={editing}
-          categories={categories}
           templates={templates}
           deptId={deptId}
           onClose={() => setShowModal(false)}
@@ -240,9 +231,9 @@ function ProductsTable({ deptId, depts, categories, selectedDept, onDeptChange, 
 
 // ── Product Modal ──────────────────────────────────────────────────────────────
 
-function ProductModal({ depts, defaultDeptId, product, categories, templates, deptId: parentDeptId, onClose, onSaved }: {
+function ProductModal({ depts, defaultDeptId, product, templates, deptId: parentDeptId, onClose, onSaved }: {
   depts: Department[]; defaultDeptId: string; product: Product | null
-  categories: ProductCategory[]; templates: ProcessRoute[]
+  templates: ProcessRoute[]
   deptId: string; onClose: () => void; onSaved: () => void
 }) {
   const [step, setStep] = useState<1 | 2>(1)
@@ -252,7 +243,7 @@ function ProductModal({ depts, defaultDeptId, product, categories, templates, de
   const [name, setName] = useState(product?.name ?? '')
   const [modelNumber, setModelNumber] = useState(product?.modelNumber ?? '')
   const [description, setDescription] = useState(product?.description ?? '')
-  const [categoryId, setCategoryId] = useState(product?.categoryId ?? '')
+  const categoryId = product?.categoryId ?? ''
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -361,14 +352,7 @@ function ProductModal({ depts, defaultDeptId, product, categories, templates, de
             })()}
           </Field>
           <Field label="說明（選填）"><input value={description} onChange={e => setDescription(e.target.value)} className={INPUT_CLS} /></Field>
-          {/* 產品種類（功能保留，UI 隱藏）
-          <Field label="產品種類（選填）">
-            <select value={categoryId} onChange={e => setCategoryId(e.target.value)} className={SELECT_CLS}>
-              <option value="">— 未設定 —</option>
-              {categories.filter(c => c.isActive).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </Field>
-          */}
+          {/* 產品種類（功能保留，UI 隱藏）— 啟用時取消註解並加回 setCategoryId + categories */}
         </div>
         {error && <p className="text-red-600 text-sm">{error}</p>}
         <div className="flex gap-3 pt-2">
@@ -382,7 +366,7 @@ function ProductModal({ depts, defaultDeptId, product, categories, templates, de
 
 // ── Steps Modal ────────────────────────────────────────────────────────────────
 
-function StepsModal({ routeId, routeName, isTemplate, deptId, templates, onClose }: {
+function StepsModal({ routeId, routeName, isTemplate: _isTemplate, deptId, templates, onClose }: {
   routeId: string; routeName: string; isTemplate: boolean
   deptId: string; templates: ProcessRoute[]; onClose: () => void
 }) {
@@ -699,7 +683,7 @@ function StepsModal({ routeId, routeName, isTemplate, deptId, templates, onClose
                   </tr>
                 </thead>
                 <tbody>
-                  {steps.map((step, i) => {
+                  {steps.map((step, _i) => {
                     const deleted = deletedIds.has(step.id)
                     const isNew = newIds.has(step.id)
                     const edited = editedIds.has(step.id)
