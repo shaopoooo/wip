@@ -41,6 +41,35 @@
 | 資料庫 | PostgreSQL 15 | JSONB、TIMESTAMPTZ、UUID 原生支援 |
 | 看板推送 | Phase 1 polling 30s；Phase 2 Socket.io | 先求穩，Phase 2 再升即時 |
 
+## GCP 連線指令
+
+```bash
+# SSH 進入 VM
+gcloud compute ssh wip-prod --zone=asia-east1-b
+
+# 部署（在 VM 內）
+cd /opt/wip
+git pull
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+
+# 查看 log
+docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f backend
+
+# 進入 DB
+docker compose -f docker-compose.yml -f docker-compose.prod.yml exec db psql -U wip_user -d wip_db
+
+# 從本機上傳檔案到 VM
+gcloud compute scp --recurse <本機路徑> wip-prod:<VM路徑> --zone=asia-east1-b
+```
+
+| 項目 | 值 |
+|------|-----|
+| GCP 專案 | yfawip |
+| VM 名稱 | wip-prod |
+| 區域 | asia-east1-b |
+| 外部 IP | 35.221.148.201 |
+| 網址 | https://wip.yfa.com.tw |
+
 ## 部署架構
 
 ### Phase 1 — VM + Docker Compose（月費約 NT$1,500~3,000）

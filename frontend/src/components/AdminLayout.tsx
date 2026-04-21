@@ -19,6 +19,8 @@ const QUICK_LINKS = [
   { to: '/trace', label: '追溯', icon: '🔍' },
 ]
 
+const FEEDBACK_URL = 'https://docs.google.com/document/d/1cQrHVc0TKEZPpw8pXte3oF0a_vNThMh9/edit?usp=sharing&ouid=113539140119952999185&rtpof=true&sd=true'
+
 export function AdminLayout() {
   const { user, logout } = useAdminAuth()
   const navigate = useNavigate()
@@ -51,6 +53,14 @@ export function AdminLayout() {
               </a>
             ))}
           </div>
+          <a
+            href={FEEDBACK_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block mt-1.5 text-center bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded px-1.5 py-1 text-[10px] transition-colors"
+          >
+            📋 Bug / 需求回報
+          </a>
         </div>
         <nav className="flex-1 overflow-y-auto py-2">
           {NAV_ITEMS.map(item => (

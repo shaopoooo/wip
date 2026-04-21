@@ -213,6 +213,27 @@ export interface StationWorkOrder {
   createdAt?: string
 }
 
+export interface DwellAlertItem {
+  workOrderId: string; orderNumber: string
+  productName: string; modelNumber: string
+  stationName: string; daysInStation: number
+  priority: string; plannedQty: number; dueDate: string | null
+}
+
+export interface DeliveryAlertItem {
+  workOrderId: string; orderNumber: string
+  productName: string; modelNumber: string
+  status: string; priority: string; plannedQty: number; dueDate: string | null
+}
+
+export interface DashboardAlerts {
+  dwell2dCount: number; dwell7dCount: number
+  dueSoonCount: number; overdueCount: number; readyToShipCount: number
+  dwell2dItems: DwellAlertItem[]; dwell7dItems: DwellAlertItem[]
+  dueSoonItems: DeliveryAlertItem[]; overdueItems: DeliveryAlertItem[]
+  readyToShipItems: DeliveryAlertItem[]
+}
+
 export const dashboardApi = {
   wip: (params?: { departmentId?: string }) => {
     const qs = params?.departmentId ? `?department_id=${params.departmentId}` : ''
@@ -231,6 +252,10 @@ export const dashboardApi = {
   },
   stationWorkOrders: (stationId: string, mode: 'in_station' | 'queuing' = 'in_station') =>
     api.get<StationWorkOrder[]>(`/dashboard/station/${stationId}/work-orders?mode=${mode}`),
+  alerts: (departmentId?: string) => {
+    const qs = departmentId ? `?department_id=${departmentId}` : ''
+    return api.get<DashboardAlerts>(`/dashboard/alerts${qs}`)
+  },
 }
 
 // ── Traceability API ───────────────────────────────────────────────────────────

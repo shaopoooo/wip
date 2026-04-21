@@ -35,10 +35,12 @@ const CreateWorkOrderSchema = z.object({
 // Format: {ROC_YYYMMDD}{3-digit seq}  e.g. 1150409001
 
 async function generateOrderNumber(_deptCode: string): Promise<string> {
+  // Use Taiwan time (UTC+8) for ROC date — GCP VM defaults to UTC
   const now = new Date()
-  const rocYear = now.getFullYear() - 1911
-  const mm = String(now.getMonth() + 1).padStart(2, '0')
-  const dd = String(now.getDate()).padStart(2, '0')
+  const twDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }))
+  const rocYear = twDate.getFullYear() - 1911
+  const mm = String(twDate.getMonth() + 1).padStart(2, '0')
+  const dd = String(twDate.getDate()).padStart(2, '0')
   const prefix = `${rocYear}${mm}${dd}`
 
   const [last] = await db
@@ -119,6 +121,88 @@ router.get('/', async (req, res, next) => {
   }
 })
 
+// GET /api/admin/work-orders/print?ids=id1,id2,...  — batch print data (must be before /:id)
+router.get('/print', async (req, res, next) => {
+  try {
+    const idsParam = req.query['ids'] as string | undefined
+    if (!idsParam) return next(new AppError(ErrorCode.VALIDATION_ERROR, 'ids query param is required'))
+
+    const ids = idsParam.split(',').filter(Boolean)
+    if (ids.length === 0 || ids.length > 50) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, 'ids 必須介於 1~50 筆'))
+    }
+
+    const results = await Promise.all(
+      ids.map(async (id) => {
+        const [wo] = await db
+          .select({
+            id: workOrders.id,
+            orderNumber: workOrders.orderNumber,
+            status: workOrders.status,
+            plannedQty: workOrders.plannedQty,
+            orderQty: workOrders.orderQty,
+            productName: products.name,
+            modelNumber: products.modelNumber,
+            productDescription: products.description,
+            dueDate: workOrders.dueDate,
+            priority: workOrders.priority,
+            note: workOrders.note,
+            routeId: workOrders.routeId,
+            createdAt: workOrders.createdAt,
+          })
+          .from(workOrders)
+          .innerJoin(products, eq(workOrders.productId, products.id))
+          .where(eq(workOrders.id, id))
+          .limit(1)
+
+        if (!wo) return null
+
+        // Route info + steps
+        let routeName: string | null = null
+        let routeDescription: string | null = null
+        let steps: { stepOrder: number; stationName: string; stationCode: string | null; standardTime: number | null }[] = []
+        if (wo.routeId) {
+          const [route] = await db.select({ name: processRoutes.name, description: processRoutes.description })
+            .from(processRoutes).where(eq(processRoutes.id, wo.routeId)).limit(1)
+          if (route) {
+            routeName = route.name
+            routeDescription = route.description
+          }
+          steps = await db
+            .select({ stepOrder: processSteps.stepOrder, stationName: stations.name, stationCode: stations.code, standardTime: processSteps.standardTime })
+            .from(processSteps)
+            .innerJoin(stations, eq(processSteps.stationId, stations.id))
+            .where(eq(processSteps.routeId, wo.routeId))
+            .orderBy(asc(processSteps.stepOrder))
+        }
+
+        const appUrl = (process.env['APP_URL'] ?? '').replace(/\/+$/, '')
+        const qrContent = appUrl ? `${appUrl}/scan?wo=${encodeURIComponent(wo.orderNumber)}` : wo.orderNumber
+        const qrDataUrl = await QRCode.toDataURL(qrContent, {
+          width: 200,
+          margin: 1,
+          errorCorrectionLevel: 'M',
+        })
+
+        return {
+          orderNumber: wo.orderNumber, status: wo.status,
+          plannedQty: wo.plannedQty, orderQty: wo.orderQty,
+          productName: wo.productName, modelNumber: wo.modelNumber,
+          productDescription: wo.productDescription,
+          dueDate: wo.dueDate, priority: wo.priority,
+          note: wo.note, createdAt: wo.createdAt,
+          routeName, routeDescription, steps,
+          qrDataUrl,
+        }
+      }),
+    )
+
+    sendSuccess(res, results.filter(Boolean))
+  } catch (err) {
+    next(err)
+  }
+})
+
 // GET /api/admin/work-orders/:id — supports UUID or orderNumber
 router.get('/:id', async (req, res, next) => {
   try {
@@ -163,6 +247,7 @@ router.get('/:id', async (req, res, next) => {
     const logs = await db
       .select({
         id: stationLogs.id,
+        stepId: stationLogs.stepId,
         stationName: stations.name,
         stationCode: stations.code,
         status: stationLogs.status,
@@ -372,55 +457,6 @@ router.get('/:id/qrcode', async (req, res, next) => {
 })
 
 // GET /api/admin/work-orders/print?ids=id1,id2,...  — batch print data
-router.get('/print', async (req, res, next) => {
-  try {
-    const idsParam = req.query['ids'] as string | undefined
-    if (!idsParam) return next(new AppError(ErrorCode.VALIDATION_ERROR, 'ids query param is required'))
-
-    const ids = idsParam.split(',').filter(Boolean)
-    if (ids.length === 0 || ids.length > 50) {
-      return next(new AppError(ErrorCode.VALIDATION_ERROR, 'ids 必須介於 1~50 筆'))
-    }
-
-    const results = await Promise.all(
-      ids.map(async (id) => {
-        const [wo] = await db
-          .select({
-            id: workOrders.id,
-            orderNumber: workOrders.orderNumber,
-            status: workOrders.status,
-            plannedQty: workOrders.plannedQty,
-            orderQty: workOrders.orderQty,
-            productName: products.name,
-            modelNumber: products.modelNumber,
-            dueDate: workOrders.dueDate,
-            priority: workOrders.priority,
-          })
-          .from(workOrders)
-          .innerJoin(products, eq(workOrders.productId, products.id))
-          .where(eq(workOrders.id, id))
-          .limit(1)
-
-        if (!wo) return null
-
-        const appUrl = (process.env['APP_URL'] ?? '').replace(/\/+$/, '')
-        const qrContent = appUrl ? `${appUrl}/scan?wo=${encodeURIComponent(wo.orderNumber)}` : wo.orderNumber
-        const qrDataUrl = await QRCode.toDataURL(qrContent, {
-          width: 200,
-          margin: 1,
-          errorCorrectionLevel: 'M',
-        })
-
-        return { ...wo, qrDataUrl }
-      }),
-    )
-
-    sendSuccess(res, results.filter(Boolean))
-  } catch (err) {
-    next(err)
-  }
-})
-
 // POST /api/admin/work-orders/:id/manual-log  — manually add a station log entry
 const ManualLogSchema = z.object({
   stationId: z.string().uuid(),
@@ -479,22 +515,23 @@ router.post('/:id/manual-log', async (req, res, next) => {
       .orderBy(asc(processSteps.stepOrder))
 
     // Find the target step
-    const targetStep = allSteps.find(s => s.stationId === stationId)
-    if (!targetStep) return next(new AppError(ErrorCode.VALIDATION_ERROR, '此站點不在工單的製程路由中'))
-
-    // Get existing completed logs for this work order
+    // Get existing completed logs for this work order (by stepId)
     const existingLogs = await db
-      .select({ stationId: stationLogs.stationId })
+      .select({ stepId: stationLogs.stepId })
       .from(stationLogs)
       .where(and(
         eq(stationLogs.workOrderId, woId),
         eq(stationLogs.status, 'completed'),
       ))
-    const completedStationIds = new Set(existingLogs.map(l => l.stationId))
+    const completedStepIds = new Set(existingLogs.map(l => l.stepId))
+
+    // Find first uncompleted step matching the target station
+    const targetStep = allSteps.find(s => s.stationId === stationId && !completedStepIds.has(s.id))
+    if (!targetStep) return next(new AppError(ErrorCode.VALIDATION_ERROR, '此站點已全部完成或不在製程路由中'))
 
     // Find all steps up to and including target that are not yet completed
     const stepsToFill = allSteps
-      .filter(s => s.stepOrder <= targetStep.stepOrder && !completedStationIds.has(s.stationId))
+      .filter(s => s.stepOrder <= targetStep.stepOrder && !completedStepIds.has(s.id))
 
     if (stepsToFill.length === 0) {
       return next(new AppError(ErrorCode.VALIDATION_ERROR, '此站點已完成'))
@@ -528,11 +565,11 @@ router.post('/:id/manual-log', async (req, res, next) => {
 
     // Check if all steps are now completed → auto set ready_to_ship
     const doneCheckLogs = await db
-      .select({ stationId: stationLogs.stationId })
+      .select({ stepId: stationLogs.stepId })
       .from(stationLogs)
       .where(and(eq(stationLogs.workOrderId, woId), eq(stationLogs.status, 'completed')))
-    const doneStationIds = new Set(doneCheckLogs.map(l => l.stationId))
-    const allDone = allSteps.every(s => doneStationIds.has(s.stationId))
+    const doneStepIds = new Set(doneCheckLogs.map(l => l.stepId))
+    const allDone = allSteps.every(s => doneStepIds.has(s.id))
     if (allDone) {
       await db.update(workOrders).set({ status: 'ready_to_ship', updatedAt: new Date() }).where(eq(workOrders.id, woId))
     }

@@ -20,7 +20,6 @@ import { EquipmentPage } from './pages/admin/EquipmentPage'
 import { RolesPage } from './pages/admin/RolesPage'
 import { UsersPage } from './pages/admin/UsersPage'
 import { DepartmentsPage } from './pages/admin/DepartmentsPage'
-import { PrintPage } from './pages/admin/PrintPage'
 import { RoutesPage } from './pages/admin/RoutesPage'
 
 const router = createBrowserRouter([
@@ -29,10 +28,8 @@ const router = createBrowserRouter([
     element: <AdminLoginLayout />,
     children: [
       { path: '/admin/login', element: <LoginPage /> },
-      { path: '/admin/print', element: <PrintPage /> },
     ],
   },
-
   // ── Admin protected area ──────────────────────────────────────────────────
   {
     element: <ProtectedAdminLayout />,

@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, isNotNull } from 'drizzle-orm'
 import { db } from '../models/db'
 import { workOrders, processSteps, stationLogs, stations, products } from '../models/schema'
 import { deviceAuth } from '../middleware/deviceAuth'
@@ -89,7 +89,14 @@ router.get('/preview', deviceAuth, async (req, res, next) => {
     const [station] = await db.select().from(stations).where(eq(stations.id, targetStationId)).limit(1)
     if (!station) return next(new AppError(ErrorCode.NOT_FOUND, '目標設備站點不存在', 500))
 
-    const step = steps.find(s => s.stationId === targetStationId)
+    // Find first uncompleted step for this station (handles duplicate station names in route)
+    const previewLogs = await db
+      .select({ stepId: stationLogs.stepId })
+      .from(stationLogs)
+      .where(and(eq(stationLogs.workOrderId, wo.id), isNotNull(stationLogs.checkOutTime)))
+    const previewDoneSteps = new Set(previewLogs.map(l => l.stepId))
+    const step = steps.find(s => s.stationId === targetStationId && !previewDoneSteps.has(s.id))
+      ?? steps.find(s => s.stationId === targetStationId)
     if (!step) return next(new AppError(ErrorCode.SKIP_STATION, '推導或指定的站點不在工單的製程'))
 
     // Open log at this station?

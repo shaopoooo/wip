@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { workOrdersApi, routesApi, WorkOrderDetail, ProcessStep } from '../../api/admin'
 import { SplitModal } from '../../components/SplitModal'
+import { openPrintWindow } from '../../utils/printWorkOrder'
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '待開工', in_progress: '進行中', manual_tracking: '人工追蹤', ready_to_ship: '待出貨', completed: '已完工', cancelled: '已取消', split: '已拆單',
@@ -82,7 +83,7 @@ export function WorkOrderDetailPage() {
     if (!id || !detail) return
     // Count how many preceding steps are uncompleted
     const uncompleted = routeSteps.filter(s =>
-      s.stepOrder < stepOrder && !completedStationIds.has(s.stationName)
+      s.stepOrder < stepOrder && !completedStepIds.has(s.id)
     )
     const autoFillMsg = uncompleted.length > 0
       ? `\n\n前方有 ${uncompleted.length} 個未完成站點（${uncompleted.map(s => s.stationName).join('、')}）將一併自動補填。`
@@ -99,88 +100,19 @@ export function WorkOrderDetailPage() {
   const handlePrint = () => {
     if (!detail || !qr) return
     const { workOrder: w, product: p, route: r } = detail
-
-    const stepsHtml = routeSteps.length > 0
-      ? routeSteps.map(s =>
-        `<tr><td class="c">${s.stepOrder}</td>` +
-        `<td>${s.stationName}${s.stationCode ? ' (' + s.stationCode + ')' : ''}</td>` +
-        `<td class="c">${s.standardTime != null ? s.standardTime + 's' : '-'}</td></tr>`
-      ).join('')
-      : '<tr><td colspan="3" style="padding:4px;text-align:center;color:#999">尚未設定</td></tr>'
-
-    const esc = (s: string) => s.replace(/</g, '&lt;')
-
-    const win = window.open('', '_blank')
-    if (!win) return
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${w.orderNumber}</title>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:"Microsoft JhengHei","PingFang TC",sans-serif;padding:10mm;font-size:11px;color:#333}
-  @page{margin:8mm}
-  .layout{display:flex;gap:12px}
-  .left{flex:1;min-width:0}
-  .right{width:200px;text-align:center;border-left:1px solid #ddd;padding-left:12px;display:flex;flex-direction:column;align-items:center}
-  .right img{width:180px;height:180px}
-  .right .num{font-family:monospace;font-weight:bold;font-size:12px;margin-top:4px}
-  .right .product{font-size:10px;color:#666;margin-top:2px}
-  .hdr{border-bottom:2px solid #333;padding-bottom:6px;margin-bottom:8px}
-  .hdr h1{font-size:18px;display:inline}
-  .hdr .urgent{color:red;font-weight:bold;font-size:12px;margin-left:8px}
-  .hdr .sub{color:#666;font-size:10px;margin-top:1px}
-  .sec{margin-bottom:8px}
-  .sec-t{font-size:12px;font-weight:bold;border-bottom:1px solid #aaa;padding-bottom:2px;margin-bottom:4px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 12px}
-  .grid .it label{color:#666;font-size:10px}
-  .grid .it span{font-weight:500}
-  .note{background:#f5f5f5;padding:3px 6px;border-radius:3px;margin-top:2px;white-space:pre-wrap;font-size:10px;line-height:1.4}
-  table{width:100%;border-collapse:collapse;font-size:10px}
-  th{background:#f0f0f0;padding:2px 6px;border:1px solid #ccc;font-weight:600}
-  td{padding:2px 6px;border:1px solid #ccc}
-  .c{text-align:center}
-</style></head><body>
-
-<div class="layout">
-<div class="left">
-
-<div class="hdr">
-  <h1>${w.orderNumber}</h1>${w.priority === 'urgent' ? '<span class="urgent">!! 急件 !!</span>' : ''}
-  <div class="sub">${esc(p.name)} — ${esc(p.modelNumber)}</div>
-</div>
-
-<div class="sec">
-  <div class="sec-t">工單資訊</div>
-  <div class="grid">
-    <div class="it"><label>訂單數量</label><br><span>${w.orderQty ?? '-'}</span></div>
-    <div class="it"><label>製作數量</label><br><span>${w.plannedQty}</span></div>
-    <div class="it"><label>優先級</label><br><span>${w.priority === 'urgent' ? '急件' : '普通'}</span></div>
-    <div class="it"><label>交期</label><br><span>${w.dueDate ?? '-'}</span></div>
-    <div class="it"><label>狀態</label><br><span>${STATUS_LABEL[w.status] ?? w.status}</span></div>
-    <div class="it"><label>建立時間</label><br><span>${formatTW(w.createdAt)}</span></div>
-  </div>
-  ${w.note ? '<div style="margin-top:3px"><label style="color:#666;font-size:10px">工單備註</label><div class="note">' + esc(w.note) + '</div></div>' : ''}
-</div>
-
-</div>
-<div class="right">
-  <img src="${qr.qrDataUrl}"/>
-  <div class="num">${w.orderNumber}</div>
-  <div class="product">${esc(p.modelNumber)}</div>
-</div>
-</div>
-
-<div class="sec">
-  <div class="sec-t">製程${r?.name ? ' — ' + esc(r.name) : ''}</div>
-  ${r?.description ? '<div style="margin-bottom:4px"><label style="color:#666;font-size:10px">製程備註</label><div class="note">' + esc(r.description) + '</div></div>' : ''}
-  ${p.description ? '<div style="margin-bottom:4px"><label style="color:#666;font-size:10px">料號備註</label><div class="note">' + esc(p.description) + '</div></div>' : ''}
-  <table>
-    <thead><tr><th class="c" style="width:35px">#</th><th>站點</th><th class="c" style="width:60px">工時</th></tr></thead>
-    <tbody>${stepsHtml}</tbody>
-  </table>
-</div>
-
-</body></html>`)
-    win.document.close()
-    win.onload = () => { win.print() }
+    openPrintWindow([{
+      orderNumber: w.orderNumber, qrDataUrl: qr.qrDataUrl,
+      productName: p.name, modelNumber: p.modelNumber,
+      productDescription: p.description ?? null,
+      plannedQty: w.plannedQty, orderQty: w.orderQty ?? null,
+      dueDate: w.dueDate, priority: w.priority, status: w.status,
+      note: w.note ?? null, createdAt: w.createdAt,
+      routeName: r?.name ?? null, routeDescription: r?.description ?? null,
+      steps: routeSteps.map(s => ({
+        stepOrder: s.stepOrder, stationName: s.stationName,
+        stationCode: s.stationCode, standardTime: s.standardTime,
+      })),
+    }])
   }
 
   if (loading) {
@@ -197,9 +129,9 @@ export function WorkOrderDetailPage() {
 
   const { workOrder: wo, product, route, logs } = detail
   const canManualLog = wo.status === 'manual_tracking'
-  // Build a set of completed station names for route step progress overlay
-  const completedStationIds = new Set(logs.filter(l => l.status === 'completed' || l.status === 'auto_filled').map(l => l.stationName))
-  const inProgressStationNames = new Set(logs.filter(l => l.status === 'in_progress').map(l => l.stationName))
+  // Build sets of completed/in-progress step IDs for route step progress overlay
+  const completedStepIds = new Set(logs.filter(l => l.status === 'completed' || l.status === 'auto_filled').map(l => l.stepId))
+  const inProgressStepIds = new Set(logs.filter(l => l.status === 'in_progress').map(l => l.stepId))
 
   return (
     <div className="p-6 max-w-4xl">
@@ -347,8 +279,8 @@ export function WorkOrderDetailPage() {
               </div>
               <div className="flex flex-wrap gap-2 p-4">
                 {routeSteps.map((step, i) => {
-                  const done = completedStationIds.has(step.stationName)
-                  const active = inProgressStationNames.has(step.stationName)
+                  const done = completedStepIds.has(step.id)
+                  const active = inProgressStepIds.has(step.id)
                   const canClick = canManualLog && !done
                   return (
                     <div key={step.id} className="flex items-center gap-1">

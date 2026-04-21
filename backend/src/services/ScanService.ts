@@ -285,12 +285,6 @@ export class ScanService {
   }): Promise<ScanResult> {
     const now = new Date()
 
-    // Confirm current station is in this route
-    const currentStep = steps.find((s) => s.stationId === station.id)
-    if (!currentStep) {
-      throw new AppError(ErrorCode.SKIP_STATION, '此站點不在工單的製程中')
-    }
-
     // 30-second dedup
     const cutoff = new Date(now.getTime() - DEDUP_SECONDS * 1000)
     const [recentLog] = await tx
@@ -317,6 +311,13 @@ export class ScanService {
       .orderBy(desc(stationLogs.checkInTime))
 
     const completedStepIds = new Set(completedLogs.map((l) => l.stepId))
+
+    // Confirm current station is in this route — find first uncompleted step for this station
+    const currentStep = steps.find((s) => s.stationId === station.id && !completedStepIds.has(s.id))
+      ?? steps.find((s) => s.stationId === station.id)
+    if (!currentStep) {
+      throw new AppError(ErrorCode.SKIP_STATION, '此站點不在工單的製程中')
+    }
     const lastCompletedStepOrder = steps
       .filter((s) => completedStepIds.has(s.id))
       .reduce((max, s) => Math.max(max, s.stepOrder), 0)

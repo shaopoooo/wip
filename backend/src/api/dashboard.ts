@@ -281,4 +281,106 @@ router.get('/station/:stationId/work-orders', async (req, res, next) => {
   }
 })
 
+// GET /api/dashboard/alerts?department_id=
+router.get('/alerts', async (req, res, next) => {
+  try {
+    const { department_id } = req.query as Record<string, string>
+    const deptFilter = department_id ? sql`AND wo.department_id = ${department_id}` : sql``
+    const taiwanToday = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' })
+
+    const result = await db.execute(sql`
+      WITH dwell_base AS (
+        SELECT
+          sl.work_order_id,
+          wo.order_number,
+          wo.planned_qty,
+          wo.priority,
+          wo.due_date,
+          p.name AS product_name,
+          p.model_number,
+          s.name AS station_name,
+          sl.check_in_time,
+          EXTRACT(EPOCH FROM (NOW() - sl.check_in_time)) / 86400.0 AS days_in_station
+        FROM station_logs sl
+        JOIN work_orders wo ON sl.work_order_id = wo.id
+        JOIN products p ON wo.product_id = p.id
+        JOIN stations s ON sl.station_id = s.id
+        WHERE sl.status = 'in_progress'
+          AND sl.check_out_time IS NULL
+          AND wo.status NOT IN ('completed', 'cancelled', 'split')
+          ${deptFilter}
+      ),
+      dwell_2d AS (SELECT * FROM dwell_base WHERE days_in_station >= 2),
+      dwell_7d AS (SELECT * FROM dwell_base WHERE days_in_station >= 7),
+      delivery_base AS (
+        SELECT
+          wo.id AS work_order_id,
+          wo.order_number,
+          wo.status,
+          wo.planned_qty,
+          wo.priority,
+          wo.due_date,
+          p.name AS product_name,
+          p.model_number
+        FROM work_orders wo
+        JOIN products p ON wo.product_id = p.id
+        WHERE wo.status NOT IN ('completed', 'cancelled', 'split')
+          ${deptFilter}
+      ),
+      due_soon AS (
+        SELECT * FROM delivery_base
+        WHERE due_date > ${taiwanToday}::date
+          AND due_date <= (${taiwanToday}::date + INTERVAL '14 days')
+          AND status NOT IN ('ready_to_ship')
+      ),
+      overdue AS (
+        SELECT * FROM delivery_base
+        WHERE due_date < ${taiwanToday}::date
+          AND status NOT IN ('ready_to_ship')
+      ),
+      ready_ship AS (
+        SELECT * FROM delivery_base
+        WHERE status = 'ready_to_ship'
+      )
+      SELECT
+        (SELECT COUNT(*)::int FROM dwell_2d) AS "dwell2dCount",
+        (SELECT COUNT(*)::int FROM dwell_7d) AS "dwell7dCount",
+        (SELECT COUNT(*)::int FROM due_soon) AS "dueSoonCount",
+        (SELECT COUNT(*)::int FROM overdue) AS "overdueCount",
+        (SELECT COUNT(*)::int FROM ready_ship) AS "readyToShipCount",
+        (SELECT COALESCE(json_agg(json_build_object(
+          'workOrderId', work_order_id, 'orderNumber', order_number,
+          'productName', product_name, 'modelNumber', model_number,
+          'stationName', station_name, 'daysInStation', ROUND(days_in_station::numeric, 1),
+          'priority', priority, 'plannedQty', planned_qty, 'dueDate', due_date
+        ) ORDER BY days_in_station DESC), '[]'::json) FROM dwell_2d) AS "dwell2dItems",
+        (SELECT COALESCE(json_agg(json_build_object(
+          'workOrderId', work_order_id, 'orderNumber', order_number,
+          'productName', product_name, 'modelNumber', model_number,
+          'stationName', station_name, 'daysInStation', ROUND(days_in_station::numeric, 1),
+          'priority', priority, 'plannedQty', planned_qty, 'dueDate', due_date
+        ) ORDER BY days_in_station DESC), '[]'::json) FROM dwell_7d) AS "dwell7dItems",
+        (SELECT COALESCE(json_agg(json_build_object(
+          'workOrderId', work_order_id, 'orderNumber', order_number,
+          'productName', product_name, 'modelNumber', model_number,
+          'status', status, 'priority', priority, 'plannedQty', planned_qty, 'dueDate', due_date
+        ) ORDER BY due_date ASC), '[]'::json) FROM due_soon) AS "dueSoonItems",
+        (SELECT COALESCE(json_agg(json_build_object(
+          'workOrderId', work_order_id, 'orderNumber', order_number,
+          'productName', product_name, 'modelNumber', model_number,
+          'status', status, 'priority', priority, 'plannedQty', planned_qty, 'dueDate', due_date
+        ) ORDER BY due_date ASC), '[]'::json) FROM overdue) AS "overdueItems",
+        (SELECT COALESCE(json_agg(json_build_object(
+          'workOrderId', work_order_id, 'orderNumber', order_number,
+          'productName', product_name, 'modelNumber', model_number,
+          'status', status, 'priority', priority, 'plannedQty', planned_qty, 'dueDate', due_date
+        ) ORDER BY due_date ASC NULLS LAST), '[]'::json) FROM ready_ship) AS "readyToShipItems"
+    `)
+
+    res.json({ success: true, data: result.rows[0] })
+  } catch (err) {
+    next(err)
+  }
+})
+
 export default router

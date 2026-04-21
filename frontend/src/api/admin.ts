@@ -146,7 +146,7 @@ export interface WorkOrderRow {
 
 export interface WorkOrderDetail extends WorkOrderRow {
   logs: {
-    id: string; stationName: string; stationCode: string | null; status: string
+    id: string; stepId: string; stationName: string; stationCode: string | null; status: string
     checkInTime: string; checkOutTime: string | null
     actualQtyIn: number | null; actualQtyOut: number | null
   }[]

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { dashboardApi, departmentsApi, type WipStation, type TodayStats, type WorkOrderProgress, type Department, type StationWorkOrder } from '../api'
+import { dashboardApi, departmentsApi, type WipStation, type TodayStats, type WorkOrderProgress, type Department, type StationWorkOrder, type DashboardAlerts, type DwellAlertItem, type DeliveryAlertItem } from '../api'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -247,6 +247,111 @@ function WipGroupSection({ group, showEmpty, expandedStation, onStationToggle }:
   )
 }
 
+function AlertBadge({ label, count, color, expanded, onClick }: {
+  label: string; count: number; color: string; expanded: boolean; onClick: () => void
+}) {
+  if (count === 0) return (
+    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/40 border border-slate-700/30 text-xs text-slate-600">
+      <span>{label}</span>
+      <span className="font-bold">0</span>
+    </div>
+  )
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs text-white font-medium transition-all cursor-pointer ${color} ${expanded ? 'ring-2 ring-blue-400 scale-105' : 'hover:scale-105'}`}
+    >
+      <span>{label}</span>
+      <span className="font-black text-sm">{count}</span>
+    </button>
+  )
+}
+
+function DwellAlertRow({ item }: { item: DwellAlertItem }) {
+  return (
+    <div
+      className="flex items-center gap-2 px-3 py-1.5 border-b border-slate-700/50 last:border-0 hover:bg-slate-700/30 transition-colors cursor-pointer text-xs"
+      onClick={() => window.open(`/trace?wo=${encodeURIComponent(item.orderNumber)}`, '_blank')}
+    >
+      {item.priority === 'urgent' && <span className="shrink-0 font-bold bg-red-600 text-white px-1 py-0.5 rounded text-[10px]">急</span>}
+      <span className="font-semibold text-slate-100">{item.orderNumber}</span>
+      <span className="text-slate-400 truncate">{item.productName}</span>
+      <span className="ml-auto flex items-center gap-2 shrink-0">
+        <span className="text-slate-500">{item.stationName}</span>
+        <span className={`font-bold ${item.daysInStation >= 7 ? 'text-red-400' : 'text-amber-400'}`}>{item.daysInStation}天</span>
+      </span>
+    </div>
+  )
+}
+
+function DeliveryAlertRow({ item }: { item: DeliveryAlertItem }) {
+  const isOverdue = item.dueDate && item.dueDate < new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' })
+  return (
+    <div
+      className="flex items-center gap-2 px-3 py-1.5 border-b border-slate-700/50 last:border-0 hover:bg-slate-700/30 transition-colors cursor-pointer text-xs"
+      onClick={() => window.open(`/trace?wo=${encodeURIComponent(item.orderNumber)}`, '_blank')}
+    >
+      {item.priority === 'urgent' && <span className="shrink-0 font-bold bg-red-600 text-white px-1 py-0.5 rounded text-[10px]">急</span>}
+      <span className="font-semibold text-slate-100">{item.orderNumber}</span>
+      <span className="text-slate-400 truncate">{item.productName}</span>
+      <span className="ml-auto flex items-center gap-2 shrink-0">
+        <span className="text-slate-500">×{item.plannedQty}</span>
+        {item.dueDate && (
+          <span className={`font-medium ${isOverdue ? 'text-red-400' : 'text-amber-400'}`}>
+            {formatDateShort(item.dueDate)}
+          </span>
+        )}
+      </span>
+    </div>
+  )
+}
+
+function AlertPanel({ alerts, expandedAlert, onToggle }: {
+  alerts: DashboardAlerts; expandedAlert: string | null; onToggle: (key: string) => void
+}) {
+  const alertConfigs = [
+    { key: 'dwell7d', label: '滯站 7天+', count: alerts.dwell7dCount, color: 'bg-red-700 border-red-500' },
+    { key: 'dwell2d', label: '滯站 2天+', count: alerts.dwell2dCount, color: 'bg-amber-700 border-amber-500' },
+    { key: 'overdue', label: '已逾期', count: alerts.overdueCount, color: 'bg-red-700 border-red-500' },
+    { key: 'dueSoon', label: '2週內交期', count: alerts.dueSoonCount, color: 'bg-amber-600 border-amber-400' },
+    { key: 'readyToShip', label: '待出貨', count: alerts.readyToShipCount, color: 'bg-emerald-700 border-emerald-500' },
+  ]
+
+  const itemsMap: Record<string, DwellAlertItem[] | DeliveryAlertItem[]> = {
+    dwell7d: alerts.dwell7dItems,
+    dwell2d: alerts.dwell2dItems,
+    overdue: alerts.overdueItems,
+    dueSoon: alerts.dueSoonItems,
+    readyToShip: alerts.readyToShipItems,
+  }
+
+  const isDwellKey = (key: string) => key === 'dwell2d' || key === 'dwell7d'
+
+  return (
+    <div className="shrink-0 border-b border-slate-800 bg-slate-900/40">
+      <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto">
+        <span className="text-[10px] text-slate-600 uppercase tracking-wide shrink-0">警示</span>
+        {alertConfigs.map(a => (
+          <AlertBadge
+            key={a.key} label={a.label} count={a.count} color={a.color}
+            expanded={expandedAlert === a.key} onClick={() => onToggle(a.key)}
+          />
+        ))}
+      </div>
+      {expandedAlert && itemsMap[expandedAlert] && itemsMap[expandedAlert]!.length > 0 && (
+        <div className="px-4 pb-2">
+          <div className="bg-slate-800/60 rounded-lg border border-slate-700/50 max-h-48 overflow-y-auto">
+            {isDwellKey(expandedAlert)
+              ? (itemsMap[expandedAlert] as DwellAlertItem[]).map(item => <DwellAlertRow key={`${item.workOrderId}-${item.stationName}`} item={item} />)
+              : (itemsMap[expandedAlert] as DeliveryAlertItem[]).map(item => <DeliveryAlertRow key={item.workOrderId} item={item} />)
+            }
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ProgressBar({ completed, total }: { completed: number; total: number }) {
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0
   return (
@@ -313,6 +418,8 @@ export function DashboardPage() {
   const [wipData, setWipData] = useState<WipStation[]>([])
   const [todayStats, setTodayStats] = useState<TodayStats | null>(null)
   const [progress, setProgress] = useState<WorkOrderProgress[]>([])
+  const [alerts, setAlerts] = useState<DashboardAlerts | null>(null)
+  const [expandedAlert, setExpandedAlert] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -321,14 +428,16 @@ export function DashboardPage() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [wip, today, prog] = await Promise.all([
+      const [wip, today, prog, alertData] = await Promise.all([
         dashboardApi.wip({ departmentId: activeDeptId }),
         dashboardApi.today(activeDeptId),
         dashboardApi.workOrderProgress({ departmentId: activeDeptId }),
+        dashboardApi.alerts(activeDeptId),
       ])
       setWipData(wip)
       setTodayStats(today)
       setProgress(prog)
+      setAlerts(alertData)
       setLastUpdated(new Date())
       setError(null)
     } catch (e) {
@@ -429,6 +538,15 @@ export function DashboardPage() {
             <span className="text-[10px] text-slate-600">{stationsWithActivity}/{totalStations} 站有工單</span>
           </div>
         </div>
+      )}
+
+      {/* ── Alert bar ── */}
+      {alerts && (
+        <AlertPanel
+          alerts={alerts}
+          expandedAlert={expandedAlert}
+          onToggle={(key) => setExpandedAlert(prev => prev === key ? null : key)}
+        />
       )}
 
       {/* ── Content: two-column layout ── */}

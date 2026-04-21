@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { workOrdersApi, productsApi, departmentsApi, WorkOrderRow, Product, Department } from '../../api/admin'
+import { workOrdersApi, productsApi, departmentsApi, routesApi, WorkOrderRow, Product, Department, ProcessRoute, ProcessStep } from '../../api/admin'
 import { useServerTable } from '../../hooks/useServerTable'
 import { TableControls } from '../../components/TableControls'
+import { StepsModal } from '../../components/StepsModal'
+import { openPrintWindow, PrintWorkOrderData } from '../../utils/printWorkOrder'
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '待開工',
@@ -178,6 +180,11 @@ function CreateWorkOrderModal({
   // fuzzy search state
   const [searchText, setSearchText] = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
+  // route steps preview
+  const [routeSteps, setRouteSteps] = useState<ProcessStep[]>([])
+  const [loadingSteps, setLoadingSteps] = useState(false)
+  const [showSteps, setShowSteps] = useState(false)
+  const [templates, setTemplates] = useState<ProcessRoute[]>([])
 
   useEffect(() => {
     if (!deptId) return
@@ -189,14 +196,63 @@ function CreateWorkOrderModal({
     setSearchText('')
   }, [deptId])
 
+  const selectedProduct = products.find(p => p.id === productId)
+
+  useEffect(() => {
+    if (!selectedProduct?.routeId) { setRouteSteps([]); return }
+    setLoadingSteps(true)
+    routesApi.steps(selectedProduct.routeId)
+      .then(setRouteSteps)
+      .catch(() => setRouteSteps([]))
+      .finally(() => setLoadingSteps(false))
+  }, [selectedProduct?.routeId])
+
+  const refreshSteps = () => {
+    if (!selectedProduct?.routeId) return
+    routesApi.steps(selectedProduct.routeId)
+      .then(setRouteSteps)
+      .catch(() => setRouteSteps([]))
+  }
+
+  const handleOpenSteps = async () => {
+    if (!selectedProduct || !deptId) return
+    // fetch templates for the StepsModal
+    try {
+      setTemplates(await routesApi.listTemplates(deptId))
+    } catch { setTemplates([]) }
+
+    // if product has no route, create one first
+    if (!selectedProduct.routeId) {
+      try {
+        const route = await routesApi.create({ departmentId: deptId, name: selectedProduct.modelNumber })
+        await productsApi.update(selectedProduct.id, { routeId: route.id })
+        // refresh products to pick up new routeId
+        const updated = await productsApi.listAll(deptId)
+        setProducts(updated)
+        setProductId(selectedProduct.id)
+      } catch (err) {
+        setError((err as Error).message)
+        return
+      }
+    }
+    setShowSteps(true)
+  }
+
+  const handleStepsClose = () => {
+    setShowSteps(false)
+    refreshSteps()
+    // refresh products to pick up any route name changes
+    if (deptId) {
+      productsApi.listAll(deptId).then(setProducts).catch(() => {})
+    }
+  }
+
   const filteredProducts = searchText.trim()
     ? products.filter(p =>
         p.modelNumber.toLowerCase().includes(searchText.toLowerCase()) ||
         p.name.toLowerCase().includes(searchText.toLowerCase())
       ).slice(0, 5)
     : products.slice(0, 5)
-
-  const selectedProduct = products.find(p => p.id === productId)
 
   const handleSelectProduct = (p: Product) => {
     setProductId(p.id)
@@ -215,13 +271,20 @@ function CreateWorkOrderModal({
     }
     setSaving(true); setError(null)
     try {
-      await workOrdersApi.create({
+      const wo = await workOrdersApi.create({
         departmentId: deptId, productId, orderQty,
         plannedQty: plannedQty !== '' ? plannedQty : undefined,
         priority, dueDate: dueDate || null,
         note: note.trim() || null,
       })
+      const wantPrint = confirm(`工單 ${wo.orderNumber} 建立成功，是否開啟列印頁面？`)
       onCreated()
+      if (wantPrint) {
+        try {
+          const printData = await workOrdersApi.print([wo.id]) as PrintWorkOrderData[]
+          if (printData.length > 0) openPrintWindow(printData)
+        } catch { /* ignore print errors */ }
+      }
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -276,13 +339,45 @@ function CreateWorkOrderModal({
               <p className="text-xs text-red-500 mt-1">物料編號不正確，請重新輸入並從下拉選單中選擇</p>
             )}
             {selectedProduct && (
-              <p className="text-xs text-slate-500 mt-1">
-                {selectedProduct.name}
-                {selectedProduct.routeId
-                  ? <span className="text-emerald-600 ml-2">已設定製程</span>
-                  : <span className="text-red-500 ml-2">未設定製程</span>
-                }
-              </p>
+              <div className="mt-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-slate-500">
+                    {selectedProduct.name}
+                    {loadingSteps
+                      ? <span className="text-slate-400 ml-2">確認製程中...</span>
+                      : selectedProduct.routeId && routeSteps.length > 0
+                        ? <span className="text-emerald-600 ml-2">已設定製程{selectedProduct.routeName ? `：${selectedProduct.routeName}` : ''}</span>
+                        : <span className="text-red-500 ml-2">未設定製程</span>
+                    }
+                  </p>
+                  {selectedProduct.modelNumber.startsWith('S') && (
+                    <button
+                      type="button"
+                      onClick={handleOpenSteps}
+                      className="text-xs text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
+                    >
+                      {selectedProduct.routeId && routeSteps.length > 0 ? '編輯製程' : '設定製程'}
+                    </button>
+                  )}
+                </div>
+                {loadingSteps && <p className="text-xs text-slate-400 mt-1">載入站點...</p>}
+                {routeSteps.length > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1">
+                    {routeSteps
+                      .sort((a, b) => a.stepOrder - b.stepOrder)
+                      .map((step, i) => (
+                        <span key={step.id} className="flex items-center">
+                          <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 text-xs px-2 py-0.5 rounded">
+                            <span className="text-slate-400 font-mono text-[10px]">{step.stepOrder}</span>
+                            {step.stationName}
+                          </span>
+                          {i < routeSteps.length - 1 && <span className="text-slate-300 mx-0.5">&rarr;</span>}
+                        </span>
+                      ))
+                    }
+                  </div>
+                )}
+              </div>
             )}
           </Field>
           <div className="grid grid-cols-2 gap-3">
@@ -316,6 +411,18 @@ function CreateWorkOrderModal({
           </button>
         </div>
       </div>
+
+      {showSteps && selectedProduct?.routeId && (
+        <StepsModal
+          routeId={selectedProduct.routeId}
+          routeName={selectedProduct.routeName ?? selectedProduct.modelNumber}
+          isTemplate={false}
+          deptId={deptId}
+          templates={templates}
+          productId={selectedProduct.id}
+          onClose={handleStepsClose}
+        />
+      )}
     </div>
   )
 }
