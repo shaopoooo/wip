@@ -22,7 +22,9 @@ router.get('/wip', async (req, res, next) => {
       WITH in_station AS (
         SELECT sl.station_id, COUNT(DISTINCT sl.work_order_id)::int AS cnt
         FROM station_logs sl
+        JOIN work_orders wo ON sl.work_order_id = wo.id
         WHERE sl.status = 'in_progress' AND sl.check_out_time IS NULL
+          AND wo.status NOT IN ('cancelled', 'completed', 'split')
         GROUP BY sl.station_id
       ),
       last_completed AS (
@@ -37,7 +39,9 @@ router.get('/wip', async (req, res, next) => {
       currently_in_station AS (
         SELECT DISTINCT sl.work_order_id
         FROM station_logs sl
+        JOIN work_orders wo ON sl.work_order_id = wo.id
         WHERE sl.status = 'in_progress' AND sl.check_out_time IS NULL
+          AND wo.status NOT IN ('cancelled', 'completed', 'split')
       ),
       queuing_at AS (
         SELECT
@@ -234,6 +238,7 @@ router.get('/station/:stationId/work-orders', async (req, res, next) => {
         WHERE sl.station_id = ${stationId}
           AND sl.status = 'in_progress'
           AND sl.check_out_time IS NULL
+          AND wo.status NOT IN ('cancelled', 'completed', 'split')
         ORDER BY sl.check_in_time DESC
       `)
       res.json({ success: true, data: result.rows })
