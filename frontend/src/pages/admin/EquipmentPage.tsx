@@ -279,14 +279,15 @@ function DeviceTokensTab() {
               <th className="text-left px-4 py-3 font-semibold text-slate-600">序號</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">狀態</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">綁定裝置</th>
+              <th className="text-left px-4 py-3 font-semibold text-slate-600">瀏覽器</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">產生時間</th>
               <th className="text-left px-4 py-3 font-semibold text-slate-600">使用時間</th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
-            {st.loading && <tr><td colSpan={6} className="text-center py-10 text-slate-400">載入中...</td></tr>}
-            {!st.loading && st.items.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-400">尚無序號</td></tr>}
+            {st.loading && <tr><td colSpan={7} className="text-center py-10 text-slate-400">載入中...</td></tr>}
+            {!st.loading && st.items.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-slate-400">尚無序號</td></tr>}
             {st.items.map(item => (
               <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
                 <td className="px-4 py-3 font-mono font-bold text-slate-800 tracking-widest">{item.token}</td>
@@ -296,6 +297,7 @@ function DeviceTokensTab() {
                   </span>
                 </td>
                 <td className="px-4 py-3 text-slate-600">{item.deviceName ?? '—'}</td>
+                <td className="px-4 py-3 text-slate-500 text-xs truncate max-w-[250px]" title={item.userAgent ?? ''}>{item.userAgent ?? '—'}</td>
                 <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(item.createdAt)}</td>
                 <td className="px-4 py-3 text-slate-500 text-xs">{item.usedAt ? formatDate(item.usedAt) : '—'}</td>
                 <td className="px-4 py-3 text-right">

@@ -33,3 +33,4 @@ logs/
 *.log
 
 ref/
+.gstack/

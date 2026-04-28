@@ -48,6 +48,7 @@ router.get('/', async (req, res, next) => {
         isUsed: deviceTokens.isUsed,
         deviceId: deviceTokens.deviceId,
         deviceName: devices.name,
+        userAgent: devices.userAgent,
         createdAt: deviceTokens.createdAt,
         usedAt: deviceTokens.usedAt,
       })

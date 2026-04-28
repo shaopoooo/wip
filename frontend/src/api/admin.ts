@@ -157,6 +157,7 @@ export interface Equipment { id: string; stationId: string; name: string; model:
 export interface DeviceToken {
   id: string; token: string; isUsed: boolean
   deviceId: string | null; deviceName: string | null
+  userAgent: string | null
   createdAt: string; usedAt: string | null
 }
 

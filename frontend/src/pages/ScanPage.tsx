@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useCallback, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Html5Qrcode } from 'html5-qrcode'
 import { scanApi, type ScanPreview, type ScanResult, type StepContext } from '../api'
 import { getStoredDeviceId } from '../hooks/useDevice'
 import { Modal } from '../components/Modal'
@@ -195,6 +196,8 @@ export function ScanPage() {
   const deviceId = getStoredDeviceId()
   const [state, dispatch] = useReducer(reducer, { status: 'idle' })
   const lastScannedRef = useRef<string | null>(null)
+  const scannerRef = useRef<Html5Qrcode | null>(null)
+  const [cameraActive, setCameraActive] = useState(false)
 
   useEffect(() => {
     if (!deviceId) navigate('/setup', { replace: true })
@@ -259,6 +262,52 @@ export function ScanPage() {
     if (wo && deviceId && state.status === 'idle') handleQr(wo)
   }, [searchParams, deviceId, state.status, handleQr])
 
+  // ── QR Camera ──────────────────────────────────────────────────────────────
+
+  const stopCamera = useCallback(async () => {
+    if (scannerRef.current) {
+      try { await scannerRef.current.stop() } catch { /* already stopped */ }
+      scannerRef.current.clear()
+      scannerRef.current = null
+    }
+    setCameraActive(false)
+  }, [])
+
+  const startCamera = useCallback(async () => {
+    if (scannerRef.current) return
+    const scanner = new Html5Qrcode('qr-reader')
+    scannerRef.current = scanner
+    setCameraActive(true)
+    try {
+      await scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        (decodedText) => {
+          // Extract order number from URL or use raw text
+          let orderNumber = decodedText
+          try {
+            const url = new URL(decodedText)
+            const wo = url.searchParams.get('wo')
+            if (wo) orderNumber = wo
+          } catch { /* not a URL, use raw text */ }
+          void stopCamera()
+          handleQr(orderNumber)
+        },
+        () => { /* ignore scan failures */ },
+      )
+    } catch {
+      setCameraActive(false)
+      scannerRef.current = null
+    }
+  }, [handleQr, stopCamera])
+
+  // Stop camera when leaving idle state or unmounting
+  useEffect(() => {
+    if (state.status !== 'idle' && cameraActive) { void stopCamera() }
+  }, [state.status, cameraActive, stopCamera])
+
+  useEffect(() => { return () => { void stopCamera() } }, [stopCamera])
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -266,13 +315,36 @@ export function ScanPage() {
 
       {/* ── Idle ── */}
       {(state.status === 'idle' || state.status === 'checkin_form' || state.status === 'checkout_form') && (
-        <div className="flex-1 flex flex-col items-center justify-center gap-6 px-8 text-center">
-          <div>
-            <h2 className="text-2xl font-bold text-white">等待掃描</h2>
-            <p className="text-slate-400 mt-2 text-sm">掃描 QR Code 或手動輸入工單號</p>
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-4 text-center">
+          {/* QR Camera */}
+          <div className="w-full max-w-sm">
+            <div
+              id="qr-reader"
+              className="rounded-xl overflow-hidden bg-slate-800"
+              style={{ display: cameraActive ? 'block' : 'none' }}
+            />
+            {!cameraActive && (
+              <button
+                onClick={() => { void startCamera() }}
+                className="w-full bg-slate-800 border border-slate-600 hover:border-blue-500 rounded-xl px-6 py-8 text-center transition-colors cursor-pointer"
+              >
+                <div className="text-4xl mb-2">📷</div>
+                <p className="text-white font-bold text-lg">點擊開啟鏡頭掃描</p>
+                <p className="text-slate-400 text-sm mt-1">對準工單 QR Code 自動報工</p>
+              </button>
+            )}
+            {cameraActive && (
+              <button
+                onClick={() => { void stopCamera() }}
+                className="w-full mt-2 text-slate-400 hover:text-white text-sm py-2 transition-colors cursor-pointer"
+              >
+                關閉鏡頭
+              </button>
+            )}
           </div>
+          {/* Manual input */}
           <form
-            className="flex gap-2 w-full max-w-md"
+            className="flex gap-2 w-full max-w-sm"
             onSubmit={(e) => {
               e.preventDefault()
               const val = (e.currentTarget.elements.namedItem('orderNumber') as HTMLInputElement).value.trim()
@@ -283,7 +355,7 @@ export function ScanPage() {
               name="orderNumber"
               autoComplete="off"
               autoCapitalize="characters"
-              placeholder="1150413001"
+              placeholder="手動輸入工單號"
               className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 text-base"
             />
             <button type="submit"

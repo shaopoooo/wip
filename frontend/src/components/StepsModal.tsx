@@ -277,26 +277,33 @@ export function StepsModal({ routeId, routeName, isTemplate: _isTemplate, deptId
       await routesApi.update(routeId, { name: routeName })
 
       if (isDirty) {
-        // 1. delete
+        // 1. delete marked steps
         for (const id of deletedIds) {
           await routesApi.deleteStep(routeId, id)
         }
-        // 2. create pending steps (from template apply/insert)
+
         const remaining = steps.filter(s => !deletedIds.has(s.id))
+
+        // 2. create pending steps and collect real IDs
+        const tempToReal = new Map<string, string>()
         for (const step of remaining) {
           if (pendingAdds.has(step.id)) {
-            await routesApi.addStep(routeId, {
+            const created = await routesApi.addStep(routeId, {
               stationId: step.stationId,
               stepOrder: step.stepOrder,
               standardTime: step.standardTime,
             })
-            continue
+            tempToReal.set(step.id, created.id)
           }
-          // 3. update existing (order + edited fields)
+        }
+
+        // 3. update ALL existing steps' order + edited fields
+        for (const step of remaining) {
+          if (pendingAdds.has(step.id)) continue // just created with correct order
           const orig = originalSteps.find(s => s.id === step.id)
-          const orderChanged = orig && orig.stepOrder !== step.stepOrder
-          const wasEdited = editedIds.has(step.id)
-          if (orderChanged || wasEdited) {
+          const orderChanged = !orig || orig.stepOrder !== step.stepOrder
+          const fieldsChanged = editedIds.has(step.id)
+          if (orderChanged || fieldsChanged) {
             await routesApi.updateStep(routeId, step.id, {
               stepOrder: step.stepOrder,
               stationId: step.stationId,
