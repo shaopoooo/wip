@@ -580,6 +580,60 @@ router.post('/:id/manual-log', async (req, res, next) => {
   }
 })
 
+// PATCH /api/admin/work-orders/:id/logs/:logId — edit a station log
+const UpdateStationLogSchema = z.object({
+  checkInTime: z.string().datetime({ offset: true }).optional(),
+  checkOutTime: z.string().datetime({ offset: true }).optional().nullable(),
+  status: z.enum(['in_progress', 'completed', 'abnormal', 'auto_filled', 'split']).optional(),
+  actualQtyIn: z.number().int().optional().nullable(),
+  actualQtyOut: z.number().int().optional().nullable(),
+  defectQty: z.number().int().min(0).optional(),
+})
+
+router.patch('/:id/logs/:logId', async (req, res, next) => {
+  try {
+    const woId = await resolveWoId(req.params['id'] as string)
+    if (!woId) return next(new AppError(ErrorCode.NOT_FOUND, '工單不存在', 404))
+
+    const logId = req.params['logId'] as string
+    
+    const parsed = UpdateStationLogSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid body'))
+    }
+
+    const [existingLog] = await db
+      .select({ id: stationLogs.id })
+      .from(stationLogs)
+      .where(and(eq(stationLogs.id, logId), eq(stationLogs.workOrderId, woId)))
+      .limit(1)
+
+    if (!existingLog) {
+      return next(new AppError(ErrorCode.NOT_FOUND, '站點歷程不存在', 404))
+    }
+
+    const updates: Record<string, unknown> = {}
+    if (parsed.data.checkInTime !== undefined) updates['checkInTime'] = new Date(parsed.data.checkInTime)
+    if (parsed.data.checkOutTime !== undefined) updates['checkOutTime'] = parsed.data.checkOutTime ? new Date(parsed.data.checkOutTime) : null
+    if (parsed.data.status !== undefined) updates['status'] = parsed.data.status
+    if (parsed.data.actualQtyIn !== undefined) updates['actualQtyIn'] = parsed.data.actualQtyIn
+    if (parsed.data.actualQtyOut !== undefined) updates['actualQtyOut'] = parsed.data.actualQtyOut
+    if (parsed.data.defectQty !== undefined) updates['defectQty'] = parsed.data.defectQty
+    
+    const [updated] = await db
+      .update(stationLogs)
+      .set(updates)
+      .where(eq(stationLogs.id, logId))
+      .returning()
+      
+    await db.update(workOrders).set({ updatedAt: new Date() }).where(eq(workOrders.id, woId))
+
+    sendSuccess(res, updated)
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ── Split ─────────────────────────────────────────────────────────────────────
 
 const SplitSchema = z.object({

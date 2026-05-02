@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { SQL, and, asc, eq, inArray, isNull, isNotNull, or } from 'drizzle-orm'
+import { SQL, and, asc, eq, ilike, inArray, isNull, isNotNull, or } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../../models/db'
 import { products, departments, productCategories, processRoutes, workOrders, stationLogs, stations } from '../../models/schema'
@@ -62,10 +62,17 @@ router.get('/', async (req, res, next) => {
       conditions.push(isNotNull(products.routeId))
     } else if (routeFilter === 'unset') {
       conditions.push(isNull(products.routeId))
+    } else if (routeFilter === 'imported') {
+      conditions.push(and(isNotNull(products.routeId), ilike(processRoutes.name, '%匯入製程%')) as SQL)
     }
 
     if (search) {
-      conditions.push(or(searchCond(products.name, search), searchCond(products.modelNumber, search)) as SQL)
+      conditions.push(or(
+        searchCond(products.name, search),
+        searchCond(products.modelNumber, search),
+        searchCond(products.description, search),
+        searchCond(processRoutes.name, search)
+      ) as SQL)
     }
 
     const where = and(...conditions)
@@ -77,7 +84,12 @@ router.get('/', async (req, res, next) => {
 
     const order = buildOrder(sortCol, sortDir === 'desc' ? 'desc' : 'asc')
 
-    const countResult = await db.select({ total: countCol }).from(products).where(where)
+    const countResult = await db
+      .select({ total: countCol })
+      .from(products)
+      .leftJoin(productCategories, eq(products.categoryId, productCategories.id))
+      .leftJoin(processRoutes, eq(products.routeId, processRoutes.id))
+      .where(where)
 
     const items = await db
       .select({

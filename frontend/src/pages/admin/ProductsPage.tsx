@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  productsApi, routesApi, departmentsApi,
+  productsApi, routesApi, departmentsApi, stationsApi,
   Product, ProcessRoute, Department,
   TemplateType, TEMPLATE_TYPE_LABELS,
 } from '../../api/admin'
 import { useServerTable } from '../../hooks/useServerTable'
 import { TableControls, SortTh } from '../../components/TableControls'
 import { StepsModal } from '../../components/StepsModal'
+import { parseRtfContent } from '../../utils/rtfParser'
 
 export function ProductsPage() {
   const [depts, setDepts] = useState<Department[]>([])
@@ -15,6 +16,49 @@ export function ProductsPage() {
   const [editing, setEditing] = useState<Product | null>(null)
   const [showTemplateManager, setShowTemplateManager] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
+  const [isImporting, setIsImporting] = useState(false)
+  const [previewData, setPreviewData] = useState<any[] | null>(null)
+
+  const handleImportRtf = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0 || !selectedDept) return
+    setIsImporting(true)
+    try {
+      const files = Array.from(e.target.files)
+      const data = []
+      
+      for (const file of files) {
+        const text = await new Promise<string>((resolve) => {
+          const reader = new FileReader()
+          reader.onload = (e) => resolve(e.target?.result as string)
+          reader.readAsText(file)
+        })
+        const parsed = parseRtfContent(text)
+        data.push(parsed)
+      }
+
+      setPreviewData(data)
+    } catch (err) {
+      alert(`解析失敗: ${(err as Error).message}`)
+    } finally {
+      setIsImporting(false)
+      e.target.value = '' // reset
+    }
+  }
+
+  const handleConfirmImport = async () => {
+    if (!previewData || !selectedDept) return
+    setIsImporting(true)
+    try {
+      const res = await routesApi.batchImport({ departmentId: selectedDept, data: previewData })
+      alert(`成功匯入 ${res.successCount} 筆製程！`)
+      setPreviewData(null)
+      setReloadKey(k => k + 1)
+    } catch (err) {
+      alert(`匯入失敗: ${(err as Error).message}`)
+    } finally {
+      setIsImporting(false)
+    }
+  }
 
   useEffect(() => {
     departmentsApi.list().then(d => {
@@ -29,6 +73,10 @@ export function ProductsPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold text-slate-800">產品型號</h1>
         <div className="flex gap-2">
+          <label className={`border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${isImporting ? 'opacity-50 pointer-events-none' : ''}`}>
+            {isImporting ? '匯入中...' : '從 RTF 匯入'}
+            <input type="file" multiple accept=".rtf" className="hidden" onChange={handleImportRtf} />
+          </label>
           <button
             onClick={() => setShowTemplateManager(true)}
             className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer"
@@ -65,6 +113,16 @@ export function ProductsPage() {
           onClose={() => { setShowTemplateManager(false); setReloadKey(k => k + 1) }}
         />
       )}
+
+      {previewData && (
+        <PreviewModal
+          data={previewData}
+          deptId={selectedDept}
+          onClose={() => setPreviewData(null)}
+          onConfirm={handleConfirmImport}
+          isImporting={isImporting}
+        />
+      )}
     </div>
   )
 }
@@ -82,7 +140,7 @@ function ProductsTable({ deptId, depts, selectedDept, onDeptChange, showModal, s
   const [templates, setTemplates] = useState<ProcessRoute[]>([])
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active')
   const [categoryFilter] = useState('')
-  const [routeFilter, setRouteFilter] = useState<'all' | 'set' | 'unset'>('all')
+  const [routeFilter, setRouteFilter] = useState<'all' | 'set' | 'unset' | 'imported'>('all')
   const [unsetCount, setUnsetCount] = useState(0)
 
   const load = useCallback(async () => {
@@ -140,6 +198,7 @@ function ProductsTable({ deptId, depts, selectedDept, onDeptChange, showModal, s
           <option value="all">全部製程</option>
           <option value="set">已設定製程</option>
           <option value="unset">未設定製程</option>
+          <option value="imported">從 RTF 匯入的製程</option>
         </select>
       </div>
 
@@ -147,7 +206,7 @@ function ProductsTable({ deptId, depts, selectedDept, onDeptChange, showModal, s
         search={st.search} onSearch={st.setSearch}
         total={st.total} page={st.page} totalPages={st.totalPages}
         setPage={st.setPage} pageSize={st.limit} onPageSize={st.setLimit}
-        placeholder="搜尋名稱或物料編號..."
+        placeholder="搜尋名稱、編號、備註或『RTF 匯入』..."
       />
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -357,8 +416,15 @@ function ProductModal({ depts, defaultDeptId, product, templates, deptId: parent
               )
             })()}
           </Field>
-          <Field label="說明（選填）"><input value={description} onChange={e => setDescription(e.target.value)} className={INPUT_CLS} /></Field>
-          {/* 產品種類（功能保留，UI 隱藏）— 啟用時取消註解並加回 setCategoryId + categories */}
+          <Field label="說明（選填）">
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              className={`${INPUT_CLS} min-h-[72px] resize-y`}
+              placeholder="可填寫產品相關說明..."
+            />
+          </Field>
+          {/* 產品種類（功能保留，UI 隱藏）*/}
         </div>
         {error && <p className="text-red-600 text-sm">{error}</p>}
         <div className="flex gap-3 pt-2">
@@ -645,3 +711,93 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const SELECT_CLS = 'border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500'
 const INPUT_CLS = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500'
 const BTN_PRIMARY = 'bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer'
+
+// ── Preview Modal ─────────────────────────────────────────────────────────────
+
+function PreviewModal({ data, deptId, onClose, onConfirm, isImporting }: {
+  data: any[]
+  deptId: string
+  onClose: () => void
+  onConfirm: () => void
+  isImporting: boolean
+}) {
+  const [existingStations, setExistingStations] = useState<string[]>([])
+
+  useEffect(() => {
+    stationsApi.list(deptId, { page: 1, limit: 1000 }).then(res => {
+      setExistingStations(res.items.map(s => s.name))
+    }).catch(() => {})
+  }, [deptId])
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+        <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100">
+          <h2 className="font-bold text-slate-800 text-lg">匯入預覽</h2>
+          <span className="text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full">共 {data.length} 筆資料</span>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          <p className="text-sm text-slate-600 mb-2">以下是從 RTF 解析出的料號與製程資訊。若系統沒有該料號或製程站點，將會自動建立：</p>
+          {data.map((item, idx) => (
+            <PreviewItem key={idx} item={item} existingStations={existingStations} />
+          ))}
+        </div>
+        <div className="px-6 py-4 border-t border-slate-100 flex gap-3">
+          <button onClick={onClose} disabled={isImporting} className="flex-1 border border-slate-300 text-slate-600 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-colors cursor-pointer">取消</button>
+          <button onClick={onConfirm} disabled={isImporting} className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors cursor-pointer">
+            {isImporting ? '匯入中...' : '確定匯入'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PreviewItem({ item, existingStations }: { item: any, existingStations: string[] }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="border border-slate-200 rounded-xl overflow-hidden">
+      <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+        <div>
+          <span className="font-mono font-bold text-slate-800 mr-2">{item.modelNumber || '未知料號'}</span>
+          <span className="text-sm text-slate-600">{item.name || '未命名'}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded-md">{item.steps.length} 個製程步驟</span>
+          <button 
+            onClick={() => setExpanded(!expanded)} 
+            className="text-xs font-semibold text-slate-500 hover:text-slate-700 bg-white border border-slate-200 px-2 py-1 rounded-md transition-colors cursor-pointer"
+          >
+            {expanded ? '收合備註' : '查看備註預覽'}
+          </button>
+        </div>
+      </div>
+      <div className="p-4 bg-white space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {item.steps.map((step: any) => {
+            const isExternal = step.orderStr.includes('-')
+            const isNew = existingStations.length > 0 && !existingStations.includes(step.stationName)
+            
+            return (
+              <div key={step.orderStr} className={`flex items-center gap-1.5 border px-2 py-1 rounded-md text-xs ${isExternal ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-100'}`}>
+                <span className={`font-mono font-bold ${isExternal ? 'text-amber-600' : 'text-slate-400'}`}>{step.orderStr}</span>
+                <span className={`font-semibold ${isExternal ? 'text-amber-800' : 'text-slate-700'}`}>{step.stationName}</span>
+                {isNew && <span className="text-[10px] bg-red-100 text-red-600 px-1 py-0.5 rounded leading-none ml-1">NEW</span>}
+              </div>
+            )
+          })}
+        </div>
+        
+        {expanded && (
+          <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+            <h4 className="text-xs font-bold text-slate-500 mb-1">將一併存入「製程說明」欄位的原始備註資料：</h4>
+            <pre className="text-[11px] leading-relaxed text-slate-600 font-mono whitespace-pre-wrap overflow-x-auto max-h-60 overflow-y-auto">
+              {item.rawText}
+            </pre>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

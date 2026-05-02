@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { SQL, and, asc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../../models/db'
-import { processRoutes, processSteps, stations, departments } from '../../models/schema'
+import { processRoutes, processSteps, stationLogs, stations, departments, groups, products } from '../../models/schema'
 import { adminAuth } from '../../middleware/adminAuth'
 import { sendSuccess } from '../../utils/response'
 import { AppError, ErrorCode } from '../../utils/errors'
@@ -350,6 +350,172 @@ router.delete('/:id/steps/:stepId', async (req, res, next) => {
     if (deleted.length === 0) return next(new AppError(ErrorCode.NOT_FOUND, '步驟不存在', 404))
 
     sendSuccess(res, null)
+  } catch (err) {
+    next(err)
+  }
+})
+
+// POST /api/admin/process-routes/batch-import
+router.post('/batch-import', async (req, res, next) => {
+  try {
+    const { departmentId, data } = req.body as {
+      departmentId: string
+      data: Array<{
+        modelNumber: string | null
+        name: string | null
+        rawText: string
+        steps: Array<{ order: number; stationName: string; description: string }>
+      }>
+    }
+
+    if (!departmentId || !Array.isArray(data)) {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, '無效的參數格式'))
+    }
+
+    const [dept] = await db.select({ id: departments.id }).from(departments).where(eq(departments.id, departmentId)).limit(1)
+    if (!dept) return next(new AppError(ErrorCode.NOT_FOUND, '部門不存在', 404))
+
+    let successCount = 0
+
+    // Fetch existing "系統匯入" group for this department, or create it
+    let systemGroupId: string
+    const [existingGroup] = await db
+      .select({ id: groups.id })
+      .from(groups)
+      .where(and(eq(groups.departmentId, departmentId), eq(groups.name, '系統匯入')))
+      .limit(1)
+      
+    if (existingGroup) {
+      systemGroupId = existingGroup.id
+    } else {
+      const [newGroup] = await db
+        .insert(groups)
+        .values({ departmentId, name: '系統匯入', description: '透過 RTF 自動匯入產生的未知站點群組' })
+        .returning()
+      if (!newGroup) throw new AppError(ErrorCode.INTERNAL_ERROR, 'Failed to create group')
+      systemGroupId = newGroup.id
+    }
+
+    // Process each route item
+    for (const item of data) {
+      if (!item.modelNumber) continue
+
+      // 1. Find or create Product
+      let productId: string
+      let existingRouteId: string | null = null
+      let productName = item.name || '未命名料號'
+      const [existingProduct] = await db
+        .select({ id: products.id, routeId: products.routeId })
+        .from(products)
+        .where(and(eq(products.departmentId, departmentId), eq(products.modelNumber, item.modelNumber)))
+        .limit(1)
+
+      if (existingProduct) {
+        productId = existingProduct.id
+        existingRouteId = existingProduct.routeId ?? null
+        // Update product description with latest RTF content
+        await db.update(products)
+          .set({ description: item.rawText, updatedAt: new Date() })
+          .where(eq(products.id, productId))
+      } else {
+        const [newProduct] = await db
+          .insert(products)
+          .values({ 
+            departmentId, 
+            modelNumber: item.modelNumber, 
+            name: productName,
+            description: item.rawText
+          })
+          .returning()
+        if (!newProduct) throw new AppError(ErrorCode.INTERNAL_ERROR, 'Failed to create product')
+        productId = newProduct.id
+      }
+
+      // 2. Find or create Process Route (upsert by product's existing routeId)
+      let routeId: string
+      if (existingRouteId) {
+        // Reuse the existing route — clear old logs & steps first
+        routeId = existingRouteId
+        // Get all step IDs for this route
+        const oldSteps = await db
+          .select({ id: processSteps.id })
+          .from(processSteps)
+          .where(eq(processSteps.routeId, routeId))
+        if (oldSteps.length > 0) {
+          const stepIds = oldSteps.map(s => s.id)
+          // Delete station_logs referencing these steps first (FK constraint)
+          for (const stepId of stepIds) {
+            await db.delete(stationLogs).where(eq(stationLogs.stepId, stepId))
+          }
+        }
+        await db.update(processRoutes)
+          .set({ 
+            name: `${item.modelNumber} 匯入製程`,
+            description: null,
+            updatedAt: new Date() 
+          })
+          .where(eq(processRoutes.id, routeId))
+        await db.delete(processSteps).where(eq(processSteps.routeId, routeId))
+      } else {
+        const [newRoute] = await db
+          .insert(processRoutes)
+          .values({
+            departmentId,
+            name: `${item.modelNumber} 匯入製程`,
+            isTemplate: false,
+            version: 1
+          })
+          .returning()
+        if (!newRoute) throw new AppError(ErrorCode.INTERNAL_ERROR, 'Failed to create route')
+        routeId = newRoute.id
+        // Link product to new route
+        await db.update(products)
+          .set({ routeId, updatedAt: new Date() })
+          .where(eq(products.id, productId))
+      }
+
+      // 3. Create Process Steps
+      let stepOrder = 1
+      for (const stepInfo of item.steps) {
+        // Find station by exact name in this department
+        let stationId: string
+        const [existingStation] = await db
+          .select({ id: stations.id })
+          .from(stations)
+          .where(and(eq(stations.departmentId, departmentId), eq(stations.name, stepInfo.stationName)))
+          .limit(1)
+
+        if (existingStation) {
+          stationId = existingStation.id
+        } else {
+          // Create missing station under "系統匯入"
+          const [newStation] = await db
+            .insert(stations)
+            .values({
+              departmentId,
+              name: stepInfo.stationName,
+              groupId: systemGroupId,
+              description: '系統匯入自動建立',
+              isActive: true
+            })
+            .returning()
+          if (!newStation) throw new AppError(ErrorCode.INTERNAL_ERROR, 'Failed to create station')
+          stationId = newStation.id
+        }
+
+        // Insert step
+        await db.insert(processSteps).values({
+          routeId,
+          stationId,
+          stepOrder: stepOrder++,
+          standardTime: 0
+        })
+      }
+      
+      successCount++
+    }
+
+    sendSuccess(res, { successCount })
   } catch (err) {
     next(err)
   }

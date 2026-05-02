@@ -35,11 +35,31 @@ export function WorkOrdersPage() {
   const [routeFilter, setRouteFilter] = useState('')
   const [showCreate, setShowCreate] = useState(false)
 
+  // Restore filters from sessionStorage on mount
+  useEffect(() => {
+    const saved = sessionStorage.getItem('wo_list_state')
+    if (saved) {
+      try {
+        const s = JSON.parse(saved)
+        if (s.search) st.setSearch(s.search)
+        if (s.statusFilter) setStatusFilter(s.statusFilter)
+        if (s.routeFilter) setRouteFilter(s.routeFilter)
+        if (s.page) st.setPage(s.page)
+      } catch { /* ignore */ }
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     departmentsApi.list().then(d => {
       setDepts(d)
-      if (d.length > 0) setSelectedDept(d[0]!.id)
-    }).catch(() => {})
+      const saved = sessionStorage.getItem('wo_list_state')
+      const savedDept = saved ? JSON.parse(saved).selectedDept : null
+      if (savedDept && d.find(dep => dep.id === savedDept)) {
+        setSelectedDept(savedDept)
+      } else if (d.length > 0) {
+        setSelectedDept(d[0]!.id)
+      }
+    }).catch(() => { })
   }, [])
 
   const load = useCallback(async () => {
@@ -53,6 +73,11 @@ export function WorkOrdersPage() {
         routeFilter: routeFilter || undefined,
       })
       st.setData(result.items, result.total)
+      // Persist filter state
+      sessionStorage.setItem('wo_list_state', JSON.stringify({
+        selectedDept, statusFilter, routeFilter,
+        search: st.params.search, page: st.params.page
+      }))
     } catch { } finally { st.setLoading(false) }
   }, [st.params, selectedDept, statusFilter, routeFilter]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -190,7 +215,7 @@ function CreateWorkOrderModal({
     if (!deptId) return
     productsApi.listAll(deptId).then(d => {
       setProducts(d)
-    }).catch(() => {})
+    }).catch(() => { })
     // reset when dept changes
     setProductId('')
     setSearchText('')
@@ -238,20 +263,38 @@ function CreateWorkOrderModal({
     setShowSteps(true)
   }
 
+  const handleConfirmRoute = async () => {
+    if (!selectedProduct?.routeId || !selectedProduct.routeName) return
+    const newName = selectedProduct.routeName.replace(/ 匯入製程$/, '').trim()
+    try {
+      setLoadingSteps(true)
+      await routesApi.update(selectedProduct.routeId, { name: newName })
+      // Refresh products list to update UI state
+      if (deptId) {
+        const updated = await productsApi.listAll(deptId)
+        setProducts(updated)
+      }
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setLoadingSteps(false)
+    }
+  }
+
   const handleStepsClose = () => {
     setShowSteps(false)
     refreshSteps()
     // refresh products to pick up any route name changes
     if (deptId) {
-      productsApi.listAll(deptId).then(setProducts).catch(() => {})
+      productsApi.listAll(deptId).then(setProducts).catch(() => { })
     }
   }
 
   const filteredProducts = searchText.trim()
     ? products.filter(p =>
-        p.modelNumber.toLowerCase().includes(searchText.toLowerCase()) ||
-        p.name.toLowerCase().includes(searchText.toLowerCase())
-      ).slice(0, 5)
+      p.modelNumber.toLowerCase().includes(searchText.toLowerCase()) ||
+      p.name.toLowerCase().includes(searchText.toLowerCase())
+    ).slice(0, 5)
     : products.slice(0, 5)
 
   const handleSelectProduct = (p: Product) => {
@@ -294,7 +337,7 @@ function CreateWorkOrderModal({
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 max-h-[95vh] overflow-y-auto">
         <h2 className="font-bold text-slate-800 text-lg">建立工單</h2>
 
         <div className="space-y-3">
@@ -361,8 +404,28 @@ function CreateWorkOrderModal({
                   )}
                 </div>
                 {loadingSteps && <p className="text-xs text-slate-400 mt-1">載入站點...</p>}
+                {selectedProduct.routeName?.endsWith('匯入製程') && (
+                  <div className="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-amber-500 flex-shrink-0 text-lg">⚠️</span>
+                        <div className="text-[11px] text-amber-800 leading-tight">
+                          <p className="font-bold mb-0.5">此料號為rtf匯入</p>
+                          <p>請確認各站點設定是否正確</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleConfirmRoute}
+                        className="flex-shrink-0 bg-white hover:bg-amber-100 text-amber-700 text-[10px] font-bold px-3 py-1.5 rounded-lg border border-amber-300 shadow-sm transition-all cursor-pointer active:scale-95"
+                      >
+                        正確無誤
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {routeSteps.length > 0 && (
-                  <div className="mt-2 flex flex-wrap items-center gap-1">
+                  <div className="mt-2 flex flex-wrap items-center gap-1 max-h-32 overflow-y-auto pr-1">
                     {routeSteps
                       .sort((a, b) => a.stepOrder - b.stepOrder)
                       .map((step, i) => (

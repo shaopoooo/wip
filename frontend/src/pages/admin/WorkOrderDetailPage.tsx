@@ -37,6 +37,7 @@ export function WorkOrderDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const [shipOpen, setShipOpen] = useState(false)
+  const [editingLog, setEditingLog] = useState<WorkOrderDetail['logs'][0] | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -194,16 +195,10 @@ export function WorkOrderDetailPage() {
             {(route?.description || product.description) && (
               <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
                 {route?.description && (
-                  <div>
-                    <p className="text-slate-500 text-xs mb-1">製程備註</p>
-                    <p className="text-slate-700 text-sm whitespace-pre-wrap bg-slate-50 rounded-lg px-3 py-2">{route.description}</p>
-                  </div>
+                  <ExpandableNote label="製程備註" text={route.description} />
                 )}
-                {product.description && (
-                  <div>
-                    <p className="text-slate-500 text-xs mb-1">料號備註</p>
-                    <p className="text-slate-700 text-sm whitespace-pre-wrap bg-slate-50 rounded-lg px-3 py-2">{product.description}</p>
-                  </div>
+                {product.description && product.description !== route?.description && (
+                  <ExpandableNote label="料號備註" text={product.description} />
                 )}
               </div>
             )}
@@ -330,6 +325,7 @@ export function WorkOrderDetailPage() {
                     <th className="text-left px-4 py-3 font-semibold text-slate-600">出站</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-600">數量</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-600">狀態</th>
+                    <th className="text-left px-4 py-3 font-semibold text-slate-600">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -343,6 +339,14 @@ export function WorkOrderDetailPage() {
                         <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${LOG_COLOR[log.status] ?? 'bg-slate-100 text-slate-600'}`}>
                           {LOG_STATUS[log.status] ?? log.status}
                         </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => setEditingLog(log)}
+                          className="text-blue-600 hover:text-blue-800 text-xs font-medium transition-colors cursor-pointer"
+                        >
+                          編輯
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -413,6 +417,16 @@ export function WorkOrderDetailPage() {
               existingNote={wo.note ?? ''}
               onClose={() => setShipOpen(false)}
               onShipped={() => { setShipOpen(false); reload() }}
+            />
+          )}
+
+          {/* Edit Log Modal */}
+          {editingLog && (
+            <EditStationLogModal
+              workOrderId={wo.id}
+              log={editingLog}
+              onClose={() => setEditingLog(null)}
+              onSaved={() => { setEditingLog(null); reload() }}
             />
           )}
       </div>
@@ -584,6 +598,131 @@ function EditWorkOrderModal({ workOrder: wo, onClose, onSaved }: {
             {saving ? '儲存中...' : '儲存'}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Edit Station Log Modal ──────────────────────────────────────────────────
+
+function formatForInput(iso: string | null) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const tzOffset = 8 * 60 * 60 * 1000
+  const local = new Date(d.getTime() + tzOffset)
+  return local.toISOString().slice(0, 16)
+}
+
+function parseFromInput(val: string) {
+  if (!val) return null
+  return new Date(val + '+08:00').toISOString()
+}
+
+function EditStationLogModal({ workOrderId, log, onClose, onSaved }: {
+  workOrderId: string
+  log: WorkOrderDetail['logs'][0]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [checkInTime, setCheckInTime] = useState(formatForInput(log.checkInTime))
+  const [checkOutTime, setCheckOutTime] = useState(formatForInput(log.checkOutTime))
+  const [status, setStatus] = useState(log.status)
+  const [actualQtyIn, setActualQtyIn] = useState(log.actualQtyIn != null ? String(log.actualQtyIn) : '')
+  const [actualQtyOut, setActualQtyOut] = useState(log.actualQtyOut != null ? String(log.actualQtyOut) : '')
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const handleSave = async () => {
+    if (!checkInTime) { setError('進站時間不可為空'); return }
+    setSaving(true)
+    setError(null)
+    try {
+      await workOrdersApi.updateLog(workOrderId, log.id, {
+        checkInTime: parseFromInput(checkInTime)!,
+        checkOutTime: checkOutTime ? parseFromInput(checkOutTime) : null,
+        status,
+        actualQtyIn: actualQtyIn ? Number(actualQtyIn) : null,
+        actualQtyOut: actualQtyOut ? Number(actualQtyOut) : null,
+      })
+      onSaved()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+        <h2 className="font-bold text-slate-800 text-lg">編輯站點歷程 — {log.stationName}</h2>
+
+        <div className="space-y-3">
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700 block mb-1">狀態</span>
+            <select value={status} onChange={e => setStatus(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500">
+              {Object.entries(LOG_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700 block mb-1">進站時間</span>
+            <input type="datetime-local" value={checkInTime} onChange={e => setCheckInTime(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" />
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700 block mb-1">出站時間</span>
+            <input type="datetime-local" value={checkOutTime} onChange={e => setCheckOutTime(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" />
+          </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700 block mb-1">入站數量</span>
+              <input type="number" min={0} value={actualQtyIn} onChange={e => setActualQtyIn(e.target.value)} placeholder="—" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" />
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700 block mb-1">出站數量</span>
+              <input type="number" min={0} value={actualQtyOut} onChange={e => setActualQtyOut(e.target.value)} placeholder="—" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" />
+            </label>
+          </div>
+        </div>
+
+        {error && <p className="text-red-600 text-sm">{error}</p>}
+
+        <div className="flex gap-3 pt-2">
+          <button onClick={onClose} className="flex-1 border border-slate-300 text-slate-600 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-colors cursor-pointer">取消</button>
+          <button onClick={handleSave} disabled={saving} className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors cursor-pointer">
+            {saving ? '儲存中...' : '儲存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ExpandableNote({ label, text }: { label: string; text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const isLong = text.length > 120
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-slate-500 text-xs">{label}</p>
+        {isLong && (
+          <button
+            onClick={() => setExpanded(v => !v)}
+            className="text-[11px] text-blue-500 hover:text-blue-700 font-medium cursor-pointer"
+          >
+            {expanded ? '收合' : '展開全文'}
+          </button>
+        )}
+      </div>
+      <div
+        className={`text-slate-700 text-xs whitespace-pre-wrap bg-slate-50 rounded-lg px-3 py-2 overflow-hidden transition-all duration-300 ${
+          !expanded && isLong ? 'max-h-20' : 'max-h-[600px]'
+        }`}
+      >
+        {text}
       </div>
     </div>
   )

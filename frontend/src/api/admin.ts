@@ -274,7 +274,7 @@ export const categoriesApi = {
 // ── Products ──────────────────────────────────────────────────────────────────
 
 export const productsApi = {
-  list: (departmentId: string, p: TableQuery & { categoryId?: string; routeFilter?: 'all' | 'set' | 'unset'; isActive?: string } = {}) => {
+  list: (departmentId: string, p: TableQuery & { categoryId?: string; routeFilter?: 'all' | 'set' | 'unset' | 'imported'; isActive?: string } = {}) => {
     const q = buildTableQuery(p)
     q.set('department_id', departmentId)
     if (p.categoryId)   q.set('category_id', p.categoryId)
@@ -316,6 +316,8 @@ export const routesApi = {
   steps: (id: string) => fetch(`/api/process-routes/${id}/steps`).then(r => r.json()).then(j => j.data as ProcessStep[]),
   create: (data: { departmentId: string; name: string; description?: string | null; version?: number; isTemplate?: boolean; templateType?: string | null }) =>
     post<ProcessRoute>('/process-routes', data),
+  batchImport: (data: { departmentId: string, data: any[] }) =>
+    post<{ successCount: number }>('/process-routes/batch-import', data),
   update: (id: string, data: Partial<{ name: string; description: string | null; isActive: boolean; templateType: string | null }>) =>
     patch<ProcessRoute>(`/process-routes/${id}`, data),
   delete: (id: string) => del<null>(`/process-routes/${id}`),
@@ -364,6 +366,8 @@ export const workOrdersApi = {
     dueDate: string | null; note: string | null; productId: string
   }>) => patch<WorkOrder>(`/work-orders/${id}`, data),
   updateStatus: (id: string, status: string) => patch<WorkOrder>(`/work-orders/${id}/status`, { status }),
+  updateLog: (id: string, logId: string, data: { checkInTime?: string; checkOutTime?: string | null; status?: string; actualQtyIn?: number | null; actualQtyOut?: number | null; defectQty?: number }) =>
+    patch<{ id: string }>(`/work-orders/${id}/logs/${logId}`, data),
   addManualLog: (id: string, data: { stationId: string; actualQtyIn?: number; actualQtyOut?: number; defectQty?: number }) =>
     post<{ id: string }>(`/work-orders/${id}/manual-log`, data),
   qrcode: (id: string) => get<{ orderNumber: string; qrDataUrl: string; status: string }>(`/work-orders/${id}/qrcode`),
